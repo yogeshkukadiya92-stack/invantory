@@ -170,8 +170,8 @@ export default function ScanPage() {
       <h1 className="text-xl font-semibold text-stone-900">Scan</h1>
 
       <div className="mt-4 flex gap-2">
-        {modeBtn("scanner", "⌨ USB scanner")}
-        {modeBtn("camera", "📷 Camera")}
+        {modeBtn("scanner", "USB scanner")}
+        {modeBtn("camera", "Camera")}
       </div>
 
       {/* SCANNER MODE */}
@@ -224,7 +224,7 @@ export default function ScanPage() {
                 {product.name}
               </p>
               <p className="text-xs text-stone-500">
-                {product.barcode} · ₹
+                {product.barcode} - INR 
                 {Number(product.selling_price).toLocaleString("en-IN")}
               </p>
             </div>

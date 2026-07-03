@@ -109,7 +109,7 @@ export default function LabelsPage() {
           disabled={totalLabels === 0}
           className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
         >
-          🖨 Print {totalLabels > 0 ? `(${totalLabels})` : ""}
+          Print {totalLabels > 0 ? `(${totalLabels})` : ""}
         </button>
       </div>
 
@@ -215,7 +215,7 @@ export default function LabelsPage() {
             </p>
             {showPrice && (
               <p className="text-[11px] font-medium text-stone-700">
-                ₹{Number(product.selling_price).toLocaleString("en-IN")}
+                INR {Number(product.selling_price).toLocaleString("en-IN")}
               </p>
             )}
             <svg id={`bc-${key}`} className="mt-1 max-w-full" />
@@ -223,7 +223,7 @@ export default function LabelsPage() {
         ))}
         {totalLabels === 0 && (
           <p className="col-span-full rounded-2xl border border-dashed border-stone-300 py-10 text-center text-sm text-stone-400 print:hidden">
-            Select products — labels will preview here
+            Select products - labels will preview here
           </p>
         )}
       </div>

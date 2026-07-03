@@ -34,7 +34,7 @@ export function AppNav({ mobile = false }: { mobile?: boolean }) {
 
   if (mobile) {
     return (
-      <nav className="fixed bottom-0 left-0 right-0 z-20 grid grid-cols-6 border-t border-slate-200 bg-white/95 px-1 py-2 shadow-[0_-18px_50px_rgba(15,23,42,0.08)] backdrop-blur md:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-20 grid grid-cols-6 border-t border-slate-200 bg-white/95 px-1 py-2 shadow-[0_-18px_50px_rgba(15,23,42,0.10)] backdrop-blur-xl md:hidden">
         {navItems.map((item) => {
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
@@ -42,7 +42,9 @@ export function AppNav({ mobile = false }: { mobile?: boolean }) {
               key={item.href}
               href={item.href}
               className={`flex flex-col items-center gap-1 rounded-xl px-1 py-1.5 text-[10px] font-semibold transition ${
-                active ? "bg-emerald-50 text-emerald-700" : "text-slate-500"
+                active
+                  ? "bg-emerald-50 text-emerald-700 shadow-sm"
+                  : "text-slate-500 hover:bg-slate-50"
               }`}
             >
               <NavIcon path={item.icon} />
@@ -64,15 +66,15 @@ export function AppNav({ mobile = false }: { mobile?: boolean }) {
             href={item.href}
             className={`group flex items-center gap-3 rounded-xl px-3 py-2.5 text-sm font-semibold transition ${
               active
-                ? "bg-slate-950 text-white shadow-sm"
+                ? "bg-slate-950 text-white shadow-[0_16px_35px_rgba(2,6,23,0.16)]"
                 : "text-slate-500 hover:bg-slate-100 hover:text-slate-950"
             }`}
           >
             <span
               className={`grid h-8 w-8 place-items-center rounded-lg transition ${
                 active
-                  ? "bg-emerald-400 text-slate-950"
-                  : "bg-white text-slate-400 ring-1 ring-slate-200 group-hover:text-emerald-700"
+                  ? "bg-emerald-400 text-slate-950 shadow-sm"
+                  : "bg-white text-slate-400 ring-1 ring-slate-200 group-hover:text-emerald-700 group-hover:ring-emerald-100"
               }`}
             >
               <NavIcon path={item.icon} />

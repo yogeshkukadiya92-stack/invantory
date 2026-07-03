@@ -77,7 +77,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
           margin: 8,
         });
       } catch {
-        // invalid barcode value — preview skip
+        // invalid barcode value, skip preview
       }
     }
   }, [form.barcode]);
@@ -207,7 +207,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
               value={form.category_id}
               onChange={(e) => set("category_id", e.target.value)}
             >
-              <option value="">— None —</option>
+              <option value="">None</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -219,7 +219,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={label}>Purchase price (₹)</label>
+            <label className={label}>Purchase price (INR)</label>
             <input
               type="number"
               inputMode="decimal"
@@ -230,7 +230,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
             />
           </div>
           <div>
-            <label className={label}>Selling price (₹)</label>
+            <label className={label}>Selling price (INR)</label>
             <input
               type="number"
               inputMode="decimal"

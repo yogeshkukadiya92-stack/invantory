@@ -216,7 +216,7 @@ export default function ReportsPage() {
             disabled={exporting === "stock"}
             className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
           >
-            {exporting === "stock" ? "Exporting..." : "⬇ Download Excel"}
+            {exporting === "stock" ? "Exporting..." : "Download Excel"}
           </button>
         </div>
 
@@ -232,7 +232,7 @@ export default function ReportsPage() {
             disabled={exporting === "movements"}
             className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
           >
-            {exporting === "movements" ? "Exporting..." : "⬇ Download Excel"}
+            {exporting === "movements" ? "Exporting..." : "Download Excel"}
           </button>
         </div>
       </div>
@@ -251,7 +251,7 @@ export default function ReportsPage() {
             value={selectedProduct}
             onChange={(e) => setSelectedProduct(e.target.value)}
           >
-            <option value="">— Select product —</option>
+            <option value="">Select product</option>
             {products.map((p) => (
               <option key={p.product_id} value={p.product_id}>
                 {p.name}
@@ -275,7 +275,7 @@ export default function ReportsPage() {
               onClick={exportLedger}
               className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
             >
-              ⬇ Excel
+              Excel
             </button>
           )}
         </div>

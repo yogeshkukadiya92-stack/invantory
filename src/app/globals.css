@@ -1,7 +1,126 @@
 @import "tailwindcss";
 
+:root {
+  --app-bg: #eef3f7;
+  --app-surface: #ffffff;
+  --app-surface-soft: #f8fafc;
+  --app-ink: #07111f;
+  --app-muted: #64748b;
+  --app-border: #dfe7ef;
+  --app-primary: #058766;
+  --app-primary-dark: #036247;
+  --app-ring: rgba(5, 135, 102, 0.22);
+  --app-shadow: 0 22px 60px rgba(15, 23, 42, 0.08);
+}
+
 html,
 body {
   max-width: 100vw;
   overflow-x: hidden;
+}
+
+html {
+  background: var(--app-bg);
+  color: var(--app-ink);
+}
+
+body {
+  min-height: 100vh;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.86), rgba(238, 243, 247, 0.96) 42rem),
+    var(--app-bg);
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+  text-rendering: optimizeLegibility;
+}
+
+::selection {
+  background: rgba(5, 135, 102, 0.18);
+  color: var(--app-ink);
+}
+
+input,
+select,
+textarea {
+  min-height: 2.75rem;
+  border-color: var(--app-border) !important;
+  background: rgba(255, 255, 255, 0.94) !important;
+  color: var(--app-ink);
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.03);
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--app-primary) !important;
+  box-shadow: 0 0 0 4px var(--app-ring) !important;
+}
+
+button,
+a {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button {
+  transition:
+    transform 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease,
+    color 160ms ease,
+    border-color 160ms ease;
+}
+
+button:not(:disabled):active,
+a:not([aria-disabled="true"]):active {
+  transform: translateY(1px);
+}
+
+table {
+  border-collapse: separate;
+  border-spacing: 0;
+}
+
+.bg-stone-100,
+.bg-slate-100 {
+  background-color: var(--app-bg) !important;
+}
+
+.border-stone-200,
+.border-slate-200 {
+  border-color: var(--app-border) !important;
+}
+
+.text-stone-900,
+.text-slate-950 {
+  color: var(--app-ink) !important;
+}
+
+.text-stone-500,
+.text-slate-500 {
+  color: var(--app-muted) !important;
+}
+
+.bg-emerald-700 {
+  background-color: var(--app-primary) !important;
+}
+
+.hover\:bg-emerald-800:hover {
+  background-color: var(--app-primary-dark) !important;
+}
+
+.shadow-sm {
+  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.06) !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
 }
