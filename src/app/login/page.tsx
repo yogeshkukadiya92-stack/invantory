@@ -6,7 +6,6 @@ import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
   const router = useRouter();
-  const supabase = createClient();
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
   const [fullName, setFullName] = useState("");
@@ -20,6 +19,7 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     setNotice(null);
+    const supabase = createClient();
 
     if (mode === "signin") {
       const { error } = await supabase.auth.signInWithPassword({
@@ -44,7 +44,7 @@ export default function LoginPage() {
         setLoading(false);
         return;
       }
-      // Email confirmation ON hoy to session nahi male
+      // When email confirmation is enabled, no session is returned
       if (!data.session) {
         setNotice("Account created. Check your email to confirm, then sign in.");
         setMode("signin");

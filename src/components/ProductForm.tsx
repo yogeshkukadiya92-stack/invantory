@@ -7,8 +7,8 @@ import { createClient } from "@/lib/supabase/client";
 import type { Category, Product } from "@/lib/types";
 
 interface Props {
-  productId?: string; // hoy to edit mode
-  initialBarcode?: string; // scan par thi aavya hoy to prefill
+  productId?: string; // edit mode when present
+  initialBarcode?: string; // prefill when opened from scan
 }
 
 export function ProductForm({ productId, initialBarcode }: Props) {
@@ -120,7 +120,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
     if (error) {
       setError(
         error.message.includes("duplicate")
-          ? "Aa barcode ke SKU already exist kare che"
+          ? "This barcode or SKU already exists"
           : error.message
       );
       setSaving(false);
@@ -132,7 +132,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
 
   async function handleDeactivate() {
     if (!productId) return;
-    if (!confirm("Product ne deactivate karvu che? (Data delete nahi thay)"))
+    if (!confirm("Deactivate this product? Existing records will be kept."))
       return;
     await supabase
       .from("products")
@@ -173,7 +173,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
               className={input}
               value={form.barcode}
               onChange={(e) => set("barcode", e.target.value)}
-              placeholder="Scan karo athva Generate dabavo"
+              placeholder="Scan barcode or click Generate"
             />
             <button
               type="button"

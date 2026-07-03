@@ -1,6 +1,6 @@
-# Inventory App — Phase 1 Setup
+# Inventory App - Phase 1 Setup
 
-## Step 1: Project banavo
+## Step 1: Create the project
 
 ```bash
 npx create-next-app@latest inventory-app --typescript --tailwind --app --src-dir --import-alias "@/*"
@@ -8,13 +8,13 @@ cd inventory-app
 npm install @supabase/supabase-js @supabase/ssr @zxing/browser jsbarcode xlsx
 ```
 
-## Step 2: Aa zip ni files copy karo
+## Step 2: Copy the app files
 
-Zip ma je structure che e j structure ma files paste karo:
+Keep this structure when copying files:
 
-```
+```text
 inventory-app/
-├── .env.local            ← .env.local.example ma thi banavo
+├── .env.local            <- create this from .env.local.example
 └── src/
     ├── middleware.ts
     ├── lib/
@@ -26,65 +26,59 @@ inventory-app/
     │   ├── SignOutButton.tsx
     │   └── ProductForm.tsx
     └── app/
-        ├── page.tsx              ← existing file REPLACE karo
+        ├── page.tsx
         ├── login/
         │   └── page.tsx
         └── (app)/
             ├── layout.tsx
             ├── dashboard/page.tsx
             ├── products/
-            │   ├── page.tsx          ← list + search + filters
-            │   ├── new/page.tsx      ← add product (barcode prefill)
-            │   ├── [id]/page.tsx     ← edit product
-            │   └── labels/page.tsx   ← barcode label printing
-            ├── scan/page.tsx         ← USB scanner + camera scan
-            ├── stock/page.tsx        ← manual entry + history
-            ├── reports/page.tsx      ← ledger + Excel exports
-            └── settings/page.tsx     ← categories + suppliers
+            │   ├── page.tsx
+            │   ├── new/page.tsx
+            │   ├── [id]/page.tsx
+            │   └── labels/page.tsx
+            ├── scan/page.tsx
+            ├── stock/page.tsx
+            ├── reports/page.tsx
+            └── settings/page.tsx
 ```
 
-**Important:** `[id]` folder na name ma square brackets [] sathe j
-rakhvu — e Next.js no dynamic route che.
+Important: keep the `[id]` folder name exactly as shown. It is a Next.js dynamic route.
 
-**Note:** `(app)` folder na name ma kauns () સાથે જ રાખવું — e Next.js nu route group che, URL ma nathi aavtu.
+Note: keep the `(app)` folder name exactly as shown. It is a Next.js route group and does not appear in the URL.
 
 ## Step 3: Environment variables
 
-`.env.local.example` ne `.env.local` name aapo ane Supabase dashboard
-(Settings → API) ma thi values bharo:
+Copy `.env.local.example` to `.env.local`, then add the values from your Supabase dashboard under Settings > API:
 
-```
+```text
 NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGci...
 ```
 
-## Step 4: Run karo
+## Step 4: Run locally
 
 ```bash
 npm run dev
 ```
 
-http://localhost:3000 kholo → login page dekhashe →
-"Create account" thi signup karo → pachi Supabase SQL Editor ma:
+Open http://localhost:3000. The login page will appear. Create an account, then run this in the Supabase SQL Editor to make your user an admin:
 
 ```sql
-update public.profiles set role = 'admin' where id = '<TAMARU_USER_UUID>';
+update public.profiles set role = 'admin' where id = '<YOUR_USER_UUID>';
 ```
 
-(UUID: Supabase → Authentication → Users ma malshe)
+You can find the UUID in Supabase > Authentication > Users.
 
 ## Camera scan note
 
-Browser camera fakt **HTTPS** (athva localhost) par j chale che.
-- Local testing: http://localhost:3000 par camera chalse ✓
-- Phone thi test karva mate: Railway par deploy karo (HTTPS auto male)
-  athva `ngrok` / `cloudflared tunnel` vaparo.
+Browser camera access works only on HTTPS or localhost.
 
-USB barcode scanner ne koi restriction nathi — e keyboard ni jem j
-kaam kare che, koi pan device par chalse.
+- Local testing: camera works on http://localhost:3000
+- Phone testing: deploy to Railway for automatic HTTPS, or use `ngrok` / `cloudflared tunnel`
 
-## Railway deploy (pachi thi)
+USB barcode scanners work like keyboards and do not have the same camera restriction.
 
-Railway par deploy karti vakhte aa 2 environment variables
-Railway na Variables tab ma pan add karvana rahese.
-# invantory
+## Railway deploy
+
+When deploying to Railway, add the same two environment variables in the Railway Variables tab.

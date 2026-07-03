@@ -72,12 +72,12 @@ export default function StockPage() {
 
   async function handleSubmit() {
     if (!form.product_id) {
-      setMessage({ kind: "err", text: "Product select karo" });
+      setMessage({ kind: "err", text: "Select a product" });
       return;
     }
     const qty = parseInt(form.quantity, 10);
     if (!qty || (form.type !== "adjustment" && qty <= 0)) {
-      setMessage({ kind: "err", text: "Valid quantity nakho" });
+      setMessage({ kind: "err", text: "Enter a valid quantity" });
       return;
     }
     setBusy(true);

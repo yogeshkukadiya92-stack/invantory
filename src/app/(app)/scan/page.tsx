@@ -38,7 +38,7 @@ export default function ScanPage() {
       const code = rawCode.trim();
       if (!code) return;
 
-      // Camera ej barcode ne varamvar detect kare — 2.5s debounce
+      // Debounce repeated camera detections of the same barcode for 2.5s.
       const now = Date.now();
       if (
         lastScanRef.current.code === code &&
@@ -69,8 +69,8 @@ export default function ScanPage() {
   );
 
   // ---------- USB SCANNER MODE ----------
-  // Scanner keyboard ni jem type kare + chhelle Enter mokle.
-  // Input hamesha focused rahe e mate blur par refocus.
+  // A USB scanner types like a keyboard and sends Enter at the end.
+  // Keep the scanner input focused while this mode is active.
   useEffect(() => {
     if (mode !== "scanner") return;
     inputRef.current?.focus();
@@ -103,7 +103,7 @@ export default function ScanPage() {
         );
         controlsRef.current = controls;
       } catch {
-        showToast("err", "Camera access denied — browser permission check karo");
+        showToast("err", "Camera access denied. Check browser permissions.");
       }
     }
     start();
@@ -120,7 +120,7 @@ export default function ScanPage() {
     if (!product) return;
     const qty = parseInt(quantity, 10);
     if (!qty || qty <= 0) {
-      showToast("err", "Quantity 1 ke tenathi vadhare hovi joie");
+      showToast("err", "Quantity must be 1 or more");
       return;
     }
     setBusy(true);
@@ -138,9 +138,9 @@ export default function ScanPage() {
     const result = data as MovementResult;
     showToast(
       "ok",
-      `${product.name}: ${type === "in" ? "+" : "−"}${qty} → have ${result.new_stock} ${product.unit}`
+      `${product.name}: ${type === "in" ? "+" : "-"}${qty} -> now ${result.new_stock} ${product.unit}`
     );
-    // Next scan mate reset
+    // Reset for the next scan
     setProduct(null);
     setNotFoundCode(null);
     setScannerValue("");
@@ -178,7 +178,7 @@ export default function ScanPage() {
       {mode === "scanner" && (
         <div className="mt-4 rounded-2xl border border-stone-200 bg-white p-5 text-center">
           <p className="text-sm text-stone-600">
-            Scanner thi barcode scan karo — entry automatic aavshe
+            Scan a barcode with the scanner. Entry will appear automatically.
           </p>
           <input
             ref={inputRef}
@@ -190,12 +190,12 @@ export default function ScanPage() {
                 setScannerValue("");
               }
             }}
-            placeholder="Barcode ahi aavshe..."
+            placeholder="Barcode will appear here..."
             className="mt-3 w-full rounded-lg border-2 border-dashed border-emerald-400 bg-emerald-50/40 px-3 py-3 text-center text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-emerald-600"
             autoComplete="off"
           />
           <p className="mt-2 text-xs text-stone-400">
-            Manually type karine Enter pan dabavi shakay
+            You can also type manually and press Enter.
           </p>
         </div>
       )}
@@ -210,12 +210,12 @@ export default function ScanPage() {
             playsInline
           />
           <p className="bg-white px-4 py-2 text-center text-xs text-stone-500">
-            Barcode ne frame ma steady rakho — auto-detect thashe
+            Keep the barcode steady inside the frame. It will auto-detect.
           </p>
         </div>
       )}
 
-      {/* PRODUCT FOUND — QUICK ENTRY */}
+      {/* PRODUCT FOUND - QUICK ENTRY */}
       {product && (
         <div className="mt-4 rounded-2xl border-2 border-emerald-600 bg-white p-5">
           <div className="flex items-start justify-between">
@@ -240,7 +240,7 @@ export default function ScanPage() {
               }
               className="h-11 w-11 rounded-lg border border-stone-300 text-lg font-semibold text-stone-700"
             >
-              −
+              -
             </button>
             <input
               type="number"
@@ -263,14 +263,14 @@ export default function ScanPage() {
               disabled={busy}
               className="rounded-lg bg-emerald-700 py-3 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
             >
-              ↓ Stock in
+              Stock in
             </button>
             <button
               onClick={() => recordMovement("out")}
               disabled={busy}
               className="rounded-lg bg-amber-600 py-3 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
             >
-              ↑ Stock out
+              Stock out
             </button>
           </div>
 
@@ -290,8 +290,8 @@ export default function ScanPage() {
       {notFoundCode && (
         <div className="mt-4 rounded-2xl border-2 border-amber-400 bg-amber-50 p-5 text-center">
           <p className="text-sm font-medium text-amber-900">
-            Barcode <span className="font-mono">{notFoundCode}</span> koi
-            product sathe match nathi thato
+            Barcode <span className="font-mono">{notFoundCode}</span> does not
+            does not match any product
           </p>
           <button
             onClick={() =>
@@ -301,7 +301,7 @@ export default function ScanPage() {
             }
             className="mt-3 rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-800"
           >
-            + Aa barcode sathe navo product add karo
+            + Add a new product with this barcode
           </button>
           <button
             onClick={() => {

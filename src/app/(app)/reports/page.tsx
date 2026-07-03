@@ -209,7 +209,7 @@ export default function ReportsPage() {
             Current stock report
           </h2>
           <p className="mt-1 text-xs text-stone-500">
-            Badha products no stock, value ane status (OK/LOW/OUT)
+            Export stock, value, and status for all products (OK/LOW/OUT)
           </p>
           <button
             onClick={exportStockReport}
@@ -225,7 +225,7 @@ export default function ReportsPage() {
             All movements export
           </h2>
           <p className="mt-1 text-xs text-stone-500">
-            Niche date range set karo (optional) ane badhi entries export karo
+            Set an optional date range below and export all entries
           </p>
           <button
             onClick={exportAllMovements}
@@ -282,7 +282,7 @@ export default function ReportsPage() {
 
         {!selectedProduct ? (
           <p className="px-4 py-8 text-center text-sm text-stone-500">
-            Ledger jova mate product select karo
+            Select a product to view the ledger
           </p>
         ) : loadingLedger ? (
           <p className="px-4 py-8 text-center text-sm text-stone-500">
@@ -349,7 +349,7 @@ export default function ReportsPage() {
                       colSpan={5}
                       className="px-4 py-6 text-center text-sm text-stone-500"
                     >
-                      Aa range ma koi entry nathi
+                      No entries found in this range
                     </td>
                   </tr>
                 )}

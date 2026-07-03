@@ -27,21 +27,21 @@ export async function middleware(request: NextRequest) {
     }
   );
 
-  // Session refresh (aa line kadhi nakhsho to auth tuti jashe)
+  // Session refresh. Removing this can break auth.
   const {
     data: { user },
   } = await supabase.auth.getUser();
 
   const isLoginPage = request.nextUrl.pathname.startsWith("/login");
 
-  // Login nathi karyu ane protected page par che → /login par mokli do
+  // Redirect unauthenticated users from protected pages to /login.
   if (!user && !isLoginPage) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
-  // Login thai gayu che ane /login par che → dashboard par mokli do
+  // Redirect authenticated users away from /login to dashboard.
   if (user && isLoginPage) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
@@ -53,7 +53,7 @@ export async function middleware(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Static files ane images sivay badhi requests par chale
+    // Run on all requests except static files and images.
     "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };

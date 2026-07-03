@@ -20,8 +20,8 @@ export async function createClient() {
               cookieStore.set(name, value, options)
             );
           } catch {
-            // Server Component ma thi call thay tyare set() fail thay —
-            // middleware session refresh sambhali le che, etle ignore.
+            // set() can fail when called from a Server Component —
+            // The middleware handles session refresh, so this is safe to ignore.
           }
         },
       },

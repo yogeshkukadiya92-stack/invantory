@@ -1,17 +1,8 @@
 import { redirect } from "next/navigation";
-import Link from "next/link";
 import { createClient } from "@/lib/supabase/server";
 import { SignOutButton } from "@/components/SignOutButton";
+import { AppNav } from "@/components/AppNav";
 import type { Profile } from "@/lib/types";
-
-const navItems = [
-  { href: "/dashboard", label: "Dashboard" },
-  { href: "/products", label: "Products" },
-  { href: "/scan", label: "Scan" },
-  { href: "/stock", label: "Stock" },
-  { href: "/reports", label: "Reports" },
-  { href: "/settings", label: "Settings" },
-];
 
 export default async function AppLayout({
   children,
@@ -32,59 +23,58 @@ export default async function AppLayout({
     .single<Profile>();
 
   return (
-    <div className="min-h-screen bg-stone-100">
-      <header className="sticky top-0 z-10 border-b border-stone-200 bg-white">
-        <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-700 text-sm font-semibold text-white">
-              IN
-            </div>
-            <span className="text-base font-semibold text-stone-900">
-              Inventory
-            </span>
+    <div className="min-h-screen bg-slate-100 text-slate-950">
+      <aside className="fixed inset-y-0 left-0 z-20 hidden w-72 border-r border-slate-200 bg-white px-5 py-5 md:block">
+        <div className="flex items-center gap-3">
+          <div className="grid h-11 w-11 place-items-center rounded-xl bg-slate-950 text-sm font-black text-white shadow-sm">
+            IN
           </div>
+          <div>
+            <p className="text-base font-black tracking-tight text-slate-950">
+              Inventory
+            </p>
+            <p className="text-xs font-medium text-slate-500">
+              Stock operations suite
+            </p>
+          </div>
+        </div>
 
-          <nav className="hidden md:flex items-center gap-1">
-            {navItems.map((item) => (
-              <Link
-                key={item.href}
-                href={item.href}
-                className="rounded-lg px-3 py-1.5 text-sm text-stone-600 hover:bg-stone-100 hover:text-stone-900 transition-colors"
-              >
-                {item.label}
-              </Link>
-            ))}
-          </nav>
+        <AppNav />
 
-          <div className="flex items-center gap-3">
-            <span className="hidden sm:block text-sm text-stone-500">
-              {profile?.full_name || user.email}
-              {profile?.role === "admin" && (
-                <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                  admin
-                </span>
-              )}
-            </span>
+        <div className="absolute bottom-5 left-5 right-5 rounded-2xl border border-emerald-100 bg-emerald-50 p-4">
+          <p className="text-xs font-bold uppercase tracking-[0.14em] text-emerald-700">
+            Workspace
+          </p>
+          <p className="mt-2 truncate text-sm font-semibold text-slate-950">
+            {profile?.full_name || user.email}
+          </p>
+          <p className="mt-1 text-xs text-slate-500">
+            {profile?.role === "admin" ? "Admin access" : "Staff access"}
+          </p>
+          <div className="mt-4">
             <SignOutButton />
           </div>
         </div>
+      </aside>
+
+      <header className="sticky top-0 z-10 border-b border-slate-200 bg-white/90 backdrop-blur md:hidden">
+        <div className="flex items-center justify-between px-4 py-3">
+          <div className="flex items-center gap-3">
+            <div className="grid h-9 w-9 place-items-center rounded-xl bg-slate-950 text-sm font-black text-white">
+              IN
+            </div>
+            <span className="text-base font-black tracking-tight text-slate-950">
+              Inventory
+            </span>
+          </div>
+          <SignOutButton />
+        </div>
       </header>
 
-      {/* Mobile bottom nav — scanning motabhage phone thi thashe */}
-      <nav className="fixed bottom-0 left-0 right-0 z-10 flex border-t border-stone-200 bg-white md:hidden">
-        {navItems.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className="flex-1 py-3 text-center text-xs font-medium text-stone-600"
-          >
-            {item.label}
-          </Link>
-        ))}
-      </nav>
+      <AppNav mobile />
 
-      <main className="mx-auto max-w-6xl px-4 py-6 pb-24 md:pb-6">
-        {children}
+      <main className="px-4 py-5 pb-24 md:ml-72 md:px-8 md:py-7 md:pb-8">
+        <div className="mx-auto max-w-7xl">{children}</div>
       </main>
     </div>
   );

@@ -28,8 +28,8 @@ export default function SettingsPage() {
 
   function friendly(message: string) {
     if (message.includes("row-level security"))
-      return "Aa action mate admin role joie";
-    if (message.includes("duplicate")) return "Aa name already exist kare che";
+      return "Admin role is required for this action";
+    if (message.includes("duplicate")) return "This name already exists";
     return message;
   }
 
@@ -45,7 +45,7 @@ export default function SettingsPage() {
   }
 
   async function deleteCategory(id: string) {
-    if (!confirm("Category delete karvi che? Products ma thi remove thai jashe."))
+    if (!confirm("Delete this category? It will be removed from products."))
       return;
     setError(null);
     const { error } = await supabase.from("categories").delete().eq("id", id);
@@ -66,7 +66,7 @@ export default function SettingsPage() {
   }
 
   async function deleteSupplier(id: string) {
-    if (!confirm("Supplier delete karvo che?")) return;
+    if (!confirm("Delete this supplier?")) return;
     setError(null);
     const { error } = await supabase.from("suppliers").delete().eq("id", id);
     if (error) return setError(friendly(error.message));
@@ -183,8 +183,8 @@ export default function SettingsPage() {
       </div>
 
       <p className="mt-4 text-xs text-stone-400">
-        Note: Categories ane suppliers delete karva admin role joie. Users ne
-        admin banavva Supabase SQL Editor vaparo.
+        Note: Admin role is required to delete categories and suppliers. Use the Supabase SQL Editor to
+        make a user an admin.
       </p>
     </div>
   );
