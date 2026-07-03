@@ -1,13 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
-import type {
-  MovementResult,
-  MovementType,
-  StockRow,
-  Supplier,
-} from "@/lib/types";
+import type { MovementResult, MovementType, StockRow, Supplier } from "@/lib/types";
 
 interface MovementRow {
   id: string;
@@ -20,17 +14,11 @@ interface MovementRow {
 }
 
 export default function StockPage() {
-  const supabase = createClient();
-
   const [products, setProducts] = useState<StockRow[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [movements, setMovements] = useState<MovementRow[]>([]);
   const [busy, setBusy] = useState(false);
-  const [message, setMessage] = useState<{
-    kind: "ok" | "err";
-    text: string;
-  } | null>(null);
-
+  const [message, setMessage] = useState<{ kind: "ok" | "err"; text: string } | null>(null);
   const [form, setForm] = useState({
     product_id: "",
     type: "in" as MovementType,
@@ -39,34 +27,27 @@ export default function StockPage() {
     supplier_id: "",
   });
 
+  const loadProducts = useCallback(async () => {
+    const response = await fetch("/api/products");
+    const { data } = await response.json();
+    setProducts((data ?? []) as StockRow[]);
+  }, []);
+
   const loadMovements = useCallback(async () => {
-    const { data } = await supabase
-      .from("stock_movements")
-      .select(
-        "id, type, quantity, reason, created_at, products(name, unit), profiles:created_by(full_name)"
-      )
-      .order("created_at", { ascending: false })
-      .limit(50);
-    setMovements((data ?? []) as unknown as MovementRow[]);
-  }, [supabase]);
+    const response = await fetch("/api/stock/movements");
+    const { data } = await response.json();
+    setMovements((data ?? []) as MovementRow[]);
+  }, []);
 
   useEffect(() => {
     async function load() {
-      const [{ data: stock }, { data: sups }] = await Promise.all([
-        supabase
-          .from("current_stock")
-          .select("*")
-          .eq("is_active", true)
-          .order("name"),
-        supabase.from("suppliers").select("*").order("name"),
-      ]);
-      setProducts((stock ?? []) as StockRow[]);
+      const suppliersRes = await fetch("/api/suppliers");
+      const { data: sups } = await suppliersRes.json();
       setSuppliers((sups ?? []) as Supplier[]);
-      loadMovements();
+      await Promise.all([loadProducts(), loadMovements()]);
     }
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [loadMovements, loadProducts]);
 
   const selectedProduct = products.find((p) => p.product_id === form.product_id);
 
@@ -83,34 +64,27 @@ export default function StockPage() {
     setBusy(true);
     setMessage(null);
 
-    const { data, error } = await supabase.rpc("record_movement", {
-      p_product_id: form.product_id,
-      p_type: form.type,
-      p_quantity: qty,
-      p_reason: form.reason.trim() || null,
-      p_supplier_id: form.type === "in" && form.supplier_id ? form.supplier_id : null,
+    const response = await fetch("/api/stock/movements", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        product_id: form.product_id,
+        type: form.type,
+        quantity: qty,
+        reason: form.reason.trim() || null,
+        supplier_id: form.type === "in" && form.supplier_id ? form.supplier_id : null,
+      }),
     });
+    const result = (await response.json()) as MovementResult & { error?: string };
     setBusy(false);
 
-    if (error) {
-      setMessage({ kind: "err", text: error.message });
+    if (!response.ok) {
+      setMessage({ kind: "err", text: result.error ?? "Could not save entry" });
       return;
     }
-    const result = data as MovementResult;
-    setMessage({
-      kind: "ok",
-      text: `Entry saved — new stock: ${result.new_stock}`,
-    });
+    setMessage({ kind: "ok", text: `Entry saved - new stock: ${result.new_stock}` });
     setForm((f) => ({ ...f, quantity: "", reason: "" }));
-
-    // Stock refresh
-    const { data: stock } = await supabase
-      .from("current_stock")
-      .select("*")
-      .eq("is_active", true)
-      .order("name");
-    setProducts((stock ?? []) as StockRow[]);
-    loadMovements();
+    await Promise.all([loadProducts(), loadMovements()]);
   }
 
   const input =
@@ -120,25 +94,14 @@ export default function StockPage() {
   return (
     <div>
       <h1 className="text-xl font-semibold text-stone-900">Stock</h1>
-
       <div className="mt-4 grid gap-4 lg:grid-cols-5">
-        {/* MANUAL ENTRY FORM */}
         <section className="rounded-2xl border border-stone-200 bg-white p-5 lg:col-span-2">
-          <h2 className="text-sm font-semibold text-stone-900">
-            Manual entry
-          </h2>
-
+          <h2 className="text-sm font-semibold text-stone-900">Manual entry</h2>
           <div className="mt-3 space-y-3">
             <div>
               <label className={label}>Product</label>
-              <select
-                className={input}
-                value={form.product_id}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, product_id: e.target.value }))
-                }
-              >
-                <option value="">— Select product —</option>
+              <select className={input} value={form.product_id} onChange={(e) => setForm((f) => ({ ...f, product_id: e.target.value }))}>
+                <option value="">Select product</option>
                 {products.map((p) => (
                   <option key={p.product_id} value={p.product_id}>
                     {p.name} ({p.stock} {p.unit})
@@ -176,37 +139,15 @@ export default function StockPage() {
             </div>
 
             <div>
-              <label className={label}>
-                Quantity
-                {form.type === "adjustment" && (
-                  <span className="ml-1 font-normal text-stone-400">
-                    (negative = remove, e.g. -5)
-                  </span>
-                )}
-              </label>
-              <input
-                type="number"
-                inputMode="numeric"
-                className={input}
-                value={form.quantity}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, quantity: e.target.value }))
-                }
-                placeholder={form.type === "adjustment" ? "e.g. -5 or 10" : "e.g. 50"}
-              />
+              <label className={label}>Quantity</label>
+              <input type="number" inputMode="numeric" className={input} value={form.quantity} onChange={(e) => setForm((f) => ({ ...f, quantity: e.target.value }))} placeholder={form.type === "adjustment" ? "e.g. -5 or 10" : "e.g. 50"} />
             </div>
 
             {form.type === "in" && (
               <div>
                 <label className={label}>Supplier (optional)</label>
-                <select
-                  className={input}
-                  value={form.supplier_id}
-                  onChange={(e) =>
-                    setForm((f) => ({ ...f, supplier_id: e.target.value }))
-                  }
-                >
-                  <option value="">— None —</option>
+                <select className={input} value={form.supplier_id} onChange={(e) => setForm((f) => ({ ...f, supplier_id: e.target.value }))}>
+                  <option value="">None</option>
                   {suppliers.map((s) => (
                     <option key={s.id} value={s.id}>
                       {s.name}
@@ -218,53 +159,27 @@ export default function StockPage() {
 
             <div>
               <label className={label}>Reason (optional)</label>
-              <input
-                className={input}
-                value={form.reason}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, reason: e.target.value }))
-                }
-                placeholder={
-                  form.type === "adjustment"
-                    ? "e.g. Damaged, count correction"
-                    : "e.g. New purchase, sale"
-                }
-              />
+              <input className={input} value={form.reason} onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))} placeholder={form.type === "adjustment" ? "e.g. Damaged, count correction" : "e.g. New purchase, sale"} />
             </div>
 
             {message && (
-              <p
-                className={`rounded-lg px-3 py-2 text-sm ${
-                  message.kind === "ok"
-                    ? "bg-emerald-50 text-emerald-800"
-                    : "bg-red-50 text-red-700"
-                }`}
-              >
+              <p className={`rounded-lg px-3 py-2 text-sm ${message.kind === "ok" ? "bg-emerald-50 text-emerald-800" : "bg-red-50 text-red-700"}`}>
                 {message.text}
               </p>
             )}
 
-            <button
-              onClick={handleSubmit}
-              disabled={busy}
-              className="w-full rounded-lg bg-emerald-700 py-2.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50 transition-colors"
-            >
+            <button onClick={handleSubmit} disabled={busy} className="w-full rounded-lg bg-emerald-700 py-2.5 text-sm font-medium text-white transition-colors hover:bg-emerald-800 disabled:opacity-50">
               {busy ? "Saving..." : "Save entry"}
             </button>
           </div>
         </section>
 
-        {/* MOVEMENT HISTORY */}
         <section className="rounded-2xl border border-stone-200 bg-white lg:col-span-3">
           <div className="border-b border-stone-100 px-4 py-3">
-            <h2 className="text-sm font-semibold text-stone-900">
-              Recent movements (last 50)
-            </h2>
+            <h2 className="text-sm font-semibold text-stone-900">Recent movements (last 50)</h2>
           </div>
           {movements.length === 0 ? (
-            <p className="px-4 py-8 text-center text-sm text-stone-500">
-              No entries yet
-            </p>
+            <p className="px-4 py-8 text-center text-sm text-stone-500">No entries yet</p>
           ) : (
             <ul className="divide-y divide-stone-100">
               {movements.map((m) => {
@@ -274,31 +189,18 @@ export default function StockPage() {
                     : m.type === "out"
                       ? "bg-amber-50 text-amber-700"
                       : "bg-stone-100 text-stone-600";
-                const sign =
-                  m.type === "in" ? "+" : m.type === "out" ? "−" : m.quantity > 0 ? "+" : "";
+                const sign = m.type === "in" ? "+" : m.type === "out" ? "-" : m.quantity > 0 ? "+" : "";
                 return (
-                  <li
-                    key={m.id}
-                    className="flex items-center justify-between px-4 py-3"
-                  >
+                  <li key={m.id} className="flex items-center justify-between px-4 py-3">
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-stone-900">
-                        {m.products?.name ?? "Unknown"}
-                      </p>
+                      <p className="truncate text-sm font-medium text-stone-900">{m.products?.name ?? "Unknown"}</p>
                       <p className="truncate text-xs text-stone-500">
-                        {new Date(m.created_at).toLocaleString("en-IN", {
-                          dateStyle: "medium",
-                          timeStyle: "short",
-                        })}
-                        {m.profiles?.full_name
-                          ? ` · ${m.profiles.full_name}`
-                          : ""}
-                        {m.reason ? ` · ${m.reason}` : ""}
+                        {new Date(m.created_at).toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" })}
+                        {m.profiles?.full_name ? ` - ${m.profiles.full_name}` : ""}
+                        {m.reason ? ` - ${m.reason}` : ""}
                       </p>
                     </div>
-                    <span
-                      className={`ml-3 shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${badge}`}
-                    >
+                    <span className={`ml-3 shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${badge}`}>
                       {sign}
                       {m.type === "adjustment" ? m.quantity : Math.abs(m.quantity)}
                     </span>

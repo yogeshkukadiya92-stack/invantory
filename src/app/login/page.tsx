@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,13 +20,12 @@ export default function LoginPage() {
     setNotice(null);
 
     try {
-      const supabase = createClient();
       const timeout = new Promise<never>((_, reject) => {
         setTimeout(
           () =>
             reject(
               new Error(
-                "Login request timed out. Check the Supabase URL, anon key, and Kong public domain in Railway."
+                "Login request timed out. Check the MongoDB connection string in Railway."
               )
             ),
           15000
@@ -35,38 +33,33 @@ export default function LoginPage() {
       });
 
       if (mode === "signin") {
-        const { error } = await Promise.race([
-          supabase.auth.signInWithPassword({
-            email,
-            password,
+        const response = await Promise.race([
+          fetch("/api/auth/signin", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password }),
           }),
           timeout,
         ]);
-        if (error) {
-          setError(error.message);
+        const result = await response.json();
+        if (!response.ok) {
+          setError(result.error ?? "Sign in failed");
           return;
         }
         router.push("/dashboard");
         router.refresh();
       } else {
-        const { data, error } = await Promise.race([
-          supabase.auth.signUp({
-            email,
-            password,
-            options: { data: { full_name: fullName } },
+        const response = await Promise.race([
+          fetch("/api/auth/signup", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, password, full_name: fullName }),
           }),
           timeout,
         ]);
-        if (error) {
-          setError(error.message);
-          return;
-        }
-        // When email confirmation is enabled, no session is returned
-        if (!data.session) {
-          setNotice(
-            "Account created. Check your email to confirm, then sign in."
-          );
-          setMode("signin");
+        const result = await response.json();
+        if (!response.ok) {
+          setError(result.error ?? "Create account failed");
           return;
         }
         router.push("/dashboard");
@@ -75,9 +68,6 @@ export default function LoginPage() {
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed.");
     } finally {
-      if (mode === "signin") {
-        setMode("signin");
-      }
       setLoading(false);
     }
   }

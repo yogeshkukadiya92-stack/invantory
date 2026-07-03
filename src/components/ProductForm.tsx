@@ -113,15 +113,18 @@ export function ProductForm({ productId, initialBarcode }: Props) {
       min_stock_level: Number(form.min_stock_level) || 0,
     };
 
-    const { error } = productId
-      ? await supabase.from("products").update(payload).eq("id", productId)
-      : await supabase.from("products").insert(payload);
+    const response = await fetch(productId ? `/api/products/${productId}` : "/api/products", {
+      method: productId ? "PUT" : "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const result = await response.json();
 
-    if (error) {
+    if (!response.ok) {
       setError(
-        error.message.includes("duplicate")
+        String(result.error ?? "").includes("exists")
           ? "This barcode or SKU already exists"
-          : error.message
+          : result.error ?? "Could not save product"
       );
       setSaving(false);
       return;
@@ -134,10 +137,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
     if (!productId) return;
     if (!confirm("Deactivate this product? Existing records will be kept."))
       return;
-    await supabase
-      .from("products")
-      .update({ is_active: false })
-      .eq("id", productId);
+    await fetch(`/api/products/${productId}`, { method: "DELETE" });
     router.push("/products");
     router.refresh();
   }

@@ -1,26 +1,16 @@
 import { redirect } from "next/navigation";
-import { createClient } from "@/lib/supabase/server";
 import { SignOutButton } from "@/components/SignOutButton";
 import { AppNav } from "@/components/AppNav";
-import type { Profile } from "@/lib/types";
+import { getCurrentUser } from "@/lib/auth";
 
 export default async function AppLayout({
   children,
 }: {
   children: React.ReactNode;
 }) {
-  const supabase = await createClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  const user = await getCurrentUser();
 
   if (!user) redirect("/login");
-
-  const { data: profile } = await supabase
-    .from("profiles")
-    .select("*")
-    .eq("id", user.id)
-    .single<Profile>();
 
   return (
     <div className="min-h-screen bg-slate-100 text-slate-950">
@@ -46,10 +36,10 @@ export default async function AppLayout({
             Workspace
           </p>
           <p className="mt-2 truncate text-sm font-semibold text-slate-950">
-            {profile?.full_name || user.email}
+            {user.full_name || user.email}
           </p>
           <p className="mt-1 text-xs text-slate-500">
-            {profile?.role === "admin" ? "Admin access" : "Staff access"}
+            {user.role === "admin" ? "Admin access" : "Staff access"}
           </p>
           <div className="mt-4">
             <SignOutButton />

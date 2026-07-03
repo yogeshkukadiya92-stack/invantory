@@ -2,11 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
 import type { Category, StockRow } from "@/lib/types";
 
 export default function ProductsPage() {
-  const supabase = createClient();
   const [rows, setRows] = useState<StockRow[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [search, setSearch] = useState("");
@@ -16,20 +14,19 @@ export default function ProductsPage() {
 
   useEffect(() => {
     async function load() {
+      const [stockRes, catsRes] = await Promise.all([
+        fetch("/api/products"),
+        fetch("/api/categories"),
+      ]);
       const [{ data: stock }, { data: cats }] = await Promise.all([
-        supabase
-          .from("current_stock")
-          .select("*")
-          .eq("is_active", true)
-          .order("name"),
-        supabase.from("categories").select("*").order("name"),
+        stockRes.json(),
+        catsRes.json(),
       ]);
       setRows((stock ?? []) as StockRow[]);
       setCategories((cats ?? []) as Category[]);
       setLoading(false);
     }
     load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const filtered = useMemo(() => {
@@ -56,13 +53,13 @@ export default function ProductsPage() {
         <div className="flex gap-2">
           <Link
             href="/products/labels"
-            className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors"
+            className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 transition-colors hover:bg-stone-50"
           >
-            🖨 Labels
+            Labels
           </Link>
           <Link
             href="/products/new"
-            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 transition-colors"
+            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-emerald-800"
           >
             + Add product
           </Link>
@@ -102,9 +99,7 @@ export default function ProductsPage() {
 
       <div className="mt-4 overflow-hidden rounded-2xl border border-stone-200 bg-white">
         {loading ? (
-          <p className="px-4 py-8 text-center text-sm text-stone-500">
-            Loading...
-          </p>
+          <p className="px-4 py-8 text-center text-sm text-stone-500">Loading...</p>
         ) : filtered.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-stone-500">
             No products found. Add your first product to get started.
@@ -118,16 +113,14 @@ export default function ProductsPage() {
                 <li key={p.product_id}>
                   <Link
                     href={`/products/${p.product_id}`}
-                    className="flex items-center justify-between px-4 py-3 hover:bg-stone-50 transition-colors"
+                    className="flex items-center justify-between px-4 py-3 transition-colors hover:bg-stone-50"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-stone-900">
-                        {p.name}
-                      </p>
+                      <p className="truncate text-sm font-medium text-stone-900">{p.name}</p>
                       <p className="truncate text-xs text-stone-500">
-                        {p.barcode ? `⧉ ${p.barcode}` : "No barcode"}
-                        {p.sku ? ` · SKU ${p.sku}` : ""}
-                        {" · ₹"}
+                        {p.barcode ? `Barcode ${p.barcode}` : "No barcode"}
+                        {p.sku ? ` - SKU ${p.sku}` : ""}
+                        {" - INR "}
                         {Number(p.selling_price).toLocaleString("en-IN")}
                       </p>
                     </div>
