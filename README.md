@@ -1,84 +1,62 @@
-# Inventory App - Phase 1 Setup
+# Inventory App
 
-## Step 1: Create the project
+Premium inventory management app built with Next.js, MongoDB, and cookie-based authentication.
 
-```bash
-npx create-next-app@latest inventory-app --typescript --tailwind --app --src-dir --import-alias "@/*"
-cd inventory-app
-npm install @supabase/supabase-js @supabase/ssr @zxing/browser jsbarcode xlsx
-```
+## Features
 
-## Step 2: Copy the app files
+- Product catalog with SKU, barcode, categories, pricing, and minimum stock
+- Barcode scanning and printable labels
+- Stock in, stock out, and adjustment history
+- Purchase receiving with supplier, reference, cost, and automatic stock update
+- Reorder queue for low-stock and out-of-stock products
+- Internal transfer log between locations or branches
+- Supplier and category master data
+- User list and role visibility
+- Dashboard, reports, and Excel export
 
-Keep this structure when copying files:
-
-```text
-inventory-app/
-├── .env.local            <- create this from .env.local.example
-└── src/
-    ├── middleware.ts
-    ├── lib/
-    │   ├── types.ts
-    │   └── supabase/
-    │       ├── client.ts
-    │       └── server.ts
-    ├── components/
-    │   ├── SignOutButton.tsx
-    │   └── ProductForm.tsx
-    └── app/
-        ├── page.tsx
-        ├── login/
-        │   └── page.tsx
-        └── (app)/
-            ├── layout.tsx
-            ├── dashboard/page.tsx
-            ├── products/
-            │   ├── page.tsx
-            │   ├── new/page.tsx
-            │   ├── [id]/page.tsx
-            │   └── labels/page.tsx
-            ├── scan/page.tsx
-            ├── stock/page.tsx
-            ├── reports/page.tsx
-            └── settings/page.tsx
-```
-
-Important: keep the `[id]` folder name exactly as shown. It is a Next.js dynamic route.
-
-Note: keep the `(app)` folder name exactly as shown. It is a Next.js route group and does not appear in the URL.
-
-## Step 3: Environment variables
-
-Copy `.env.local.example` to `.env.local`, then add the values from your Supabase dashboard under Settings > API:
-
-```text
-NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGci...
-```
-
-## Step 4: Run locally
+## Local Setup
 
 ```bash
+npm install
+cp .env.local.example .env.local
 npm run dev
 ```
 
-Open http://localhost:3000. The login page will appear. Create an account, then run this in the Supabase SQL Editor to make your user an admin:
+Open `http://localhost:3000`, create the first account, and sign in. The first registered account becomes admin automatically.
 
-```sql
-update public.profiles set role = 'admin' where id = '<YOUR_USER_UUID>';
+## Environment Variables
+
+```text
+MONGODB_URI=mongodb://...
+MONGODB_DB=inventory
+AUTH_SECRET=long-random-secret
 ```
 
-You can find the UUID in Supabase > Authentication > Users.
+`MONGODB_DB` is optional. If it is not set, the app uses `inventory`.
 
-## Camera scan note
+## Railway Deploy
+
+Add a MongoDB service in Railway, then set these variables on the app service:
+
+```text
+MONGODB_URI=${{mongodb.MONGO_URL}}
+AUTH_SECRET=long-random-secret
+```
+
+Use a strong random `AUTH_SECRET` and keep it unchanged after users start logging in, because existing login cookies are signed with this value.
+
+## Build
+
+```bash
+npm run build
+```
+
+The app uses a MongoDB compatibility layer for older Supabase-named helper files, but production data is stored in MongoDB.
+
+## Camera Scan Note
 
 Browser camera access works only on HTTPS or localhost.
 
-- Local testing: camera works on http://localhost:3000
-- Phone testing: deploy to Railway for automatic HTTPS, or use `ngrok` / `cloudflared tunnel`
-
-USB barcode scanners work like keyboards and do not have the same camera restriction.
-
-## Railway deploy
-
-When deploying to Railway, add the same two environment variables in the Railway Variables tab.
+- Local testing: camera works on `http://localhost:3000`
+- Railway deployment uses HTTPS automatically
+- USB barcode scanners work like keyboards and do not need camera permission

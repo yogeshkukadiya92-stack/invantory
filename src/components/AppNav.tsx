@@ -6,11 +6,22 @@ import { usePathname } from "next/navigation";
 const navItems = [
   { href: "/dashboard", label: "Dashboard", icon: "M4 13h6V4H4v9Zm0 7h6v-5H4v5Zm8 0h8v-9h-8v9Zm0-11h8V4h-8v5Z" },
   { href: "/products", label: "Products", icon: "M4 7.5 12 3l8 4.5v9L12 21l-8-4.5v-9Zm8 4.5 8-4.5M12 12 4 7.5M12 12v9" },
+  { href: "/purchases", label: "Purchases", icon: "M6 6h15l-1.5 8h-12L6 6Zm0 0 2 12h10M9 21h.01M17 21h.01M3 3h2.5" },
+  { href: "/reorder", label: "Reorder", icon: "M4 5h10M4 12h16M4 19h10M17 3l3 3-3 3M7 15l-3 4 3 4" },
   { href: "/scan", label: "Scan", icon: "M5 7V5h4M15 5h4v2M19 17v2h-4M9 19H5v-2M7 12h10" },
   { href: "/stock", label: "Stock", icon: "M5 17h14M7 17V8l5-3 5 3v9M9 11h6" },
+  { href: "/adjustments", label: "Adjustments", icon: "M4 7h12M4 17h12M18 5v4M18 15v4M8 5v4M8 15v4" },
+  { href: "/transfers", label: "Transfers", icon: "M7 7h13l-3-3M20 7l-3 3M17 17H4l3 3M4 17l3-3" },
   { href: "/reports", label: "Reports", icon: "M5 19V5h14v14H5Zm4-4v-4M12 15V8M15 15v-2" },
+  { href: "/suppliers", label: "Suppliers", icon: "M7 18v-1a4 4 0 0 1 8 0v1M11 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM17 11h4M19 9v4" },
+  { href: "/categories", label: "Categories", icon: "M4 6h7v7H4V6Zm9 0h7v7h-7V6ZM4 15h7v3H4v-3Zm9 0h7v3h-7v-3Z" },
+  { href: "/users", label: "Users", icon: "M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" },
   { href: "/settings", label: "Settings", icon: "M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Zm0-5v2M12 18.5v2M4.43 4.43l1.42 1.42M18.15 18.15l1.42 1.42M3.5 12h2M18.5 12h2M4.43 19.57l1.42-1.42M18.15 5.85l1.42-1.42" },
 ];
+
+const mobileItems = navItems.filter((item) =>
+  ["/dashboard", "/products", "/purchases", "/scan", "/stock", "/reports"].includes(item.href)
+);
 
 function NavIcon({ path }: { path: string }) {
   return (
@@ -35,7 +46,7 @@ export function AppNav({ mobile = false }: { mobile?: boolean }) {
   if (mobile) {
     return (
       <nav className="fixed bottom-0 left-0 right-0 z-20 grid grid-cols-6 border-t border-slate-200 bg-white/95 px-1 py-2 shadow-[0_-18px_50px_rgba(15,23,42,0.10)] backdrop-blur-xl md:hidden">
-        {navItems.map((item) => {
+        {mobileItems.map((item) => {
           const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
           return (
             <Link

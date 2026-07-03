@@ -51,6 +51,34 @@ export interface StockMovement {
   created_at: string;
 }
 
+export interface PurchaseOrder {
+  id: string;
+  product_id: string;
+  supplier_id: string | null;
+  quantity: number;
+  unit_cost: number;
+  reference: string | null;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+  products?: { name: string; unit: string } | null;
+  suppliers?: { name: string } | null;
+  profiles?: { full_name: string } | null;
+}
+
+export interface TransferRecord {
+  id: string;
+  product_id: string;
+  quantity: number;
+  from_location: string;
+  to_location: string;
+  note: string | null;
+  created_by: string | null;
+  created_at: string;
+  products?: { name: string; unit: string } | null;
+  profiles?: { full_name: string } | null;
+}
+
 /** current_stock view no ek row */
 export interface StockRow {
   product_id: string;
