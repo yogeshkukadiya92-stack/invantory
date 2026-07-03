@@ -19,40 +19,66 @@ export default function LoginPage() {
     setLoading(true);
     setError(null);
     setNotice(null);
-    const supabase = createClient();
 
-    if (mode === "signin") {
-      const { error } = await supabase.auth.signInWithPassword({
-        email,
-        password,
+    try {
+      const supabase = createClient();
+      const timeout = new Promise<never>((_, reject) => {
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                "Login request timed out. Check the Supabase URL, anon key, and Kong public domain in Railway."
+              )
+            ),
+          15000
+        );
       });
-      if (error) {
-        setError(error.message);
-        setLoading(false);
-        return;
+
+      if (mode === "signin") {
+        const { error } = await Promise.race([
+          supabase.auth.signInWithPassword({
+            email,
+            password,
+          }),
+          timeout,
+        ]);
+        if (error) {
+          setError(error.message);
+          return;
+        }
+        router.push("/dashboard");
+        router.refresh();
+      } else {
+        const { data, error } = await Promise.race([
+          supabase.auth.signUp({
+            email,
+            password,
+            options: { data: { full_name: fullName } },
+          }),
+          timeout,
+        ]);
+        if (error) {
+          setError(error.message);
+          return;
+        }
+        // When email confirmation is enabled, no session is returned
+        if (!data.session) {
+          setNotice(
+            "Account created. Check your email to confirm, then sign in."
+          );
+          setMode("signin");
+          return;
+        }
+        router.push("/dashboard");
+        router.refresh();
       }
-      router.push("/dashboard");
-      router.refresh();
-    } else {
-      const { data, error } = await supabase.auth.signUp({
-        email,
-        password,
-        options: { data: { full_name: fullName } },
-      });
-      if (error) {
-        setError(error.message);
-        setLoading(false);
-        return;
-      }
-      // When email confirmation is enabled, no session is returned
-      if (!data.session) {
-        setNotice("Account created. Check your email to confirm, then sign in.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login failed.");
+    } finally {
+      if (mode === "signin") {
         setMode("signin");
-        setLoading(false);
-        return;
       }
-      router.push("/dashboard");
-      router.refresh();
+      setLoading(false);
     }
   }
 
