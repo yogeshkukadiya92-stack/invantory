@@ -1,0 +1,330 @@
+"use client";
+
+import { useCallback, useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
+import { BrowserMultiFormatReader, IScannerControls } from "@zxing/browser";
+import { createClient } from "@/lib/supabase/client";
+import type { BarcodeLookup, MovementResult, StockRow } from "@/lib/types";
+
+type Mode = "scanner" | "camera";
+
+export default function ScanPage() {
+  const router = useRouter();
+  const supabase = createClient();
+
+  const [mode, setMode] = useState<Mode>("scanner");
+  const [scannerValue, setScannerValue] = useState("");
+  const [product, setProduct] = useState<StockRow | null>(null);
+  const [notFoundCode, setNotFoundCode] = useState<string | null>(null);
+  const [quantity, setQuantity] = useState("1");
+  const [busy, setBusy] = useState(false);
+  const [toast, setToast] = useState<{
+    kind: "ok" | "err";
+    text: string;
+  } | null>(null);
+
+  const inputRef = useRef<HTMLInputElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const controlsRef = useRef<IScannerControls | null>(null);
+  const lastScanRef = useRef<{ code: string; at: number }>({ code: "", at: 0 });
+
+  const showToast = useCallback((kind: "ok" | "err", text: string) => {
+    setToast({ kind, text });
+    setTimeout(() => setToast(null), 3500);
+  }, []);
+
+  const handleScan = useCallback(
+    async (rawCode: string) => {
+      const code = rawCode.trim();
+      if (!code) return;
+
+      // Camera ej barcode ne varamvar detect kare — 2.5s debounce
+      const now = Date.now();
+      if (
+        lastScanRef.current.code === code &&
+        now - lastScanRef.current.at < 2500
+      )
+        return;
+      lastScanRef.current = { code, at: now };
+
+      const { data, error } = await supabase.rpc("lookup_barcode", {
+        p_barcode: code,
+      });
+      if (error) {
+        showToast("err", error.message);
+        return;
+      }
+      const result = data as BarcodeLookup;
+      if (result.found) {
+        setProduct(result.product);
+        setNotFoundCode(null);
+        setQuantity("1");
+        if (navigator.vibrate) navigator.vibrate(80);
+      } else {
+        setProduct(null);
+        setNotFoundCode(code);
+      }
+    },
+    [supabase, showToast]
+  );
+
+  // ---------- USB SCANNER MODE ----------
+  // Scanner keyboard ni jem type kare + chhelle Enter mokle.
+  // Input hamesha focused rahe e mate blur par refocus.
+  useEffect(() => {
+    if (mode !== "scanner") return;
+    inputRef.current?.focus();
+    const interval = setInterval(() => {
+      if (
+        document.activeElement?.tagName !== "INPUT" &&
+        document.activeElement?.tagName !== "SELECT" &&
+        document.activeElement?.tagName !== "BUTTON"
+      ) {
+        inputRef.current?.focus();
+      }
+    }, 800);
+    return () => clearInterval(interval);
+  }, [mode, product, notFoundCode]);
+
+  // ---------- CAMERA MODE ----------
+  useEffect(() => {
+    if (mode !== "camera") return;
+    const reader = new BrowserMultiFormatReader();
+    let active = true;
+
+    async function start() {
+      try {
+        const controls = await reader.decodeFromVideoDevice(
+          undefined, // default (back) camera
+          videoRef.current!,
+          (result) => {
+            if (result && active) handleScan(result.getText());
+          }
+        );
+        controlsRef.current = controls;
+      } catch {
+        showToast("err", "Camera access denied — browser permission check karo");
+      }
+    }
+    start();
+
+    return () => {
+      active = false;
+      controlsRef.current?.stop();
+      controlsRef.current = null;
+    };
+  }, [mode, handleScan, showToast]);
+
+  // ---------- STOCK ENTRY ----------
+  async function recordMovement(type: "in" | "out") {
+    if (!product) return;
+    const qty = parseInt(quantity, 10);
+    if (!qty || qty <= 0) {
+      showToast("err", "Quantity 1 ke tenathi vadhare hovi joie");
+      return;
+    }
+    setBusy(true);
+    const { data, error } = await supabase.rpc("record_movement", {
+      p_product_id: product.product_id,
+      p_type: type,
+      p_quantity: qty,
+    });
+    setBusy(false);
+
+    if (error) {
+      showToast("err", error.message);
+      return;
+    }
+    const result = data as MovementResult;
+    showToast(
+      "ok",
+      `${product.name}: ${type === "in" ? "+" : "−"}${qty} → have ${result.new_stock} ${product.unit}`
+    );
+    // Next scan mate reset
+    setProduct(null);
+    setNotFoundCode(null);
+    setScannerValue("");
+    lastScanRef.current = { code: "", at: 0 };
+    inputRef.current?.focus();
+  }
+
+  const modeBtn = (m: Mode, labelText: string) => (
+    <button
+      onClick={() => {
+        setMode(m);
+        setProduct(null);
+        setNotFoundCode(null);
+      }}
+      className={`flex-1 rounded-lg py-2.5 text-sm font-medium transition-colors ${
+        mode === m
+          ? "bg-emerald-700 text-white"
+          : "bg-white text-stone-700 border border-stone-300 hover:bg-stone-50"
+      }`}
+    >
+      {labelText}
+    </button>
+  );
+
+  return (
+    <div className="mx-auto max-w-md">
+      <h1 className="text-xl font-semibold text-stone-900">Scan</h1>
+
+      <div className="mt-4 flex gap-2">
+        {modeBtn("scanner", "⌨ USB scanner")}
+        {modeBtn("camera", "📷 Camera")}
+      </div>
+
+      {/* SCANNER MODE */}
+      {mode === "scanner" && (
+        <div className="mt-4 rounded-2xl border border-stone-200 bg-white p-5 text-center">
+          <p className="text-sm text-stone-600">
+            Scanner thi barcode scan karo — entry automatic aavshe
+          </p>
+          <input
+            ref={inputRef}
+            value={scannerValue}
+            onChange={(e) => setScannerValue(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                handleScan(scannerValue);
+                setScannerValue("");
+              }
+            }}
+            placeholder="Barcode ahi aavshe..."
+            className="mt-3 w-full rounded-lg border-2 border-dashed border-emerald-400 bg-emerald-50/40 px-3 py-3 text-center text-lg tracking-widest focus:outline-none focus:ring-2 focus:ring-emerald-600"
+            autoComplete="off"
+          />
+          <p className="mt-2 text-xs text-stone-400">
+            Manually type karine Enter pan dabavi shakay
+          </p>
+        </div>
+      )}
+
+      {/* CAMERA MODE */}
+      {mode === "camera" && (
+        <div className="mt-4 overflow-hidden rounded-2xl border border-stone-200 bg-black">
+          <video
+            ref={videoRef}
+            className="aspect-[4/3] w-full object-cover"
+            muted
+            playsInline
+          />
+          <p className="bg-white px-4 py-2 text-center text-xs text-stone-500">
+            Barcode ne frame ma steady rakho — auto-detect thashe
+          </p>
+        </div>
+      )}
+
+      {/* PRODUCT FOUND — QUICK ENTRY */}
+      {product && (
+        <div className="mt-4 rounded-2xl border-2 border-emerald-600 bg-white p-5">
+          <div className="flex items-start justify-between">
+            <div>
+              <p className="text-base font-semibold text-stone-900">
+                {product.name}
+              </p>
+              <p className="text-xs text-stone-500">
+                {product.barcode} · ₹
+                {Number(product.selling_price).toLocaleString("en-IN")}
+              </p>
+            </div>
+            <span className="rounded-full bg-stone-100 px-2.5 py-1 text-xs font-semibold text-stone-700">
+              Stock: {product.stock} {product.unit}
+            </span>
+          </div>
+
+          <div className="mt-4 flex items-center gap-2">
+            <button
+              onClick={() =>
+                setQuantity((q) => String(Math.max(1, (parseInt(q) || 1) - 1)))
+              }
+              className="h-11 w-11 rounded-lg border border-stone-300 text-lg font-semibold text-stone-700"
+            >
+              −
+            </button>
+            <input
+              type="number"
+              inputMode="numeric"
+              value={quantity}
+              onChange={(e) => setQuantity(e.target.value)}
+              className="h-11 flex-1 rounded-lg border border-stone-300 text-center text-lg font-semibold focus:outline-none focus:ring-2 focus:ring-emerald-600"
+            />
+            <button
+              onClick={() => setQuantity((q) => String((parseInt(q) || 0) + 1))}
+              className="h-11 w-11 rounded-lg border border-stone-300 text-lg font-semibold text-stone-700"
+            >
+              +
+            </button>
+          </div>
+
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            <button
+              onClick={() => recordMovement("in")}
+              disabled={busy}
+              className="rounded-lg bg-emerald-700 py-3 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+            >
+              ↓ Stock in
+            </button>
+            <button
+              onClick={() => recordMovement("out")}
+              disabled={busy}
+              className="rounded-lg bg-amber-600 py-3 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
+            >
+              ↑ Stock out
+            </button>
+          </div>
+
+          <button
+            onClick={() => {
+              setProduct(null);
+              inputRef.current?.focus();
+            }}
+            className="mt-2 w-full py-2 text-sm text-stone-500 hover:text-stone-700"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
+
+      {/* NOT FOUND */}
+      {notFoundCode && (
+        <div className="mt-4 rounded-2xl border-2 border-amber-400 bg-amber-50 p-5 text-center">
+          <p className="text-sm font-medium text-amber-900">
+            Barcode <span className="font-mono">{notFoundCode}</span> koi
+            product sathe match nathi thato
+          </p>
+          <button
+            onClick={() =>
+              router.push(
+                `/products/new?barcode=${encodeURIComponent(notFoundCode)}`
+              )
+            }
+            className="mt-3 rounded-lg bg-emerald-700 px-4 py-2.5 text-sm font-medium text-white hover:bg-emerald-800"
+          >
+            + Aa barcode sathe navo product add karo
+          </button>
+          <button
+            onClick={() => {
+              setNotFoundCode(null);
+              inputRef.current?.focus();
+            }}
+            className="mt-2 block w-full py-1 text-sm text-stone-500"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
+
+      {/* TOAST */}
+      {toast && (
+        <div
+          className={`fixed bottom-20 left-1/2 z-20 -translate-x-1/2 rounded-xl px-4 py-3 text-sm font-medium text-white shadow-lg md:bottom-6 ${
+            toast.kind === "ok" ? "bg-emerald-700" : "bg-red-600"
+          }`}
+        >
+          {toast.text}
+        </div>
+      )}
+    </div>
+  );
+}
