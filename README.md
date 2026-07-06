@@ -1,62 +1,90 @@
-# Inventory App
+# Inventory App — Phase 1 Setup
 
-Premium inventory management app built with Next.js, MongoDB, and cookie-based authentication.
-
-## Features
-
-- Product catalog with SKU, barcode, categories, pricing, and minimum stock
-- Barcode scanning and printable labels
-- Stock in, stock out, and adjustment history
-- Purchase receiving with supplier, reference, cost, and automatic stock update
-- Reorder queue for low-stock and out-of-stock products
-- Internal transfer log between locations or branches
-- Supplier and category master data
-- User list and role visibility
-- Dashboard, reports, and Excel export
-
-## Local Setup
+## Step 1: Project banavo
 
 ```bash
-npm install
-cp .env.local.example .env.local
+npx create-next-app@latest inventory-app --typescript --tailwind --app --src-dir --import-alias "@/*"
+cd inventory-app
+npm install @supabase/supabase-js @supabase/ssr @zxing/browser jsbarcode xlsx
+```
+
+## Step 2: Aa zip ni files copy karo
+
+Zip ma je structure che e j structure ma files paste karo:
+
+```
+inventory-app/
+├── .env.local            ← .env.local.example ma thi banavo
+└── src/
+    ├── middleware.ts
+    ├── lib/
+    │   ├── types.ts
+    │   └── supabase/
+    │       ├── client.ts
+    │       └── server.ts
+    ├── components/
+    │   ├── SignOutButton.tsx
+    │   └── ProductForm.tsx
+    └── app/
+        ├── page.tsx              ← existing file REPLACE karo
+        ├── login/
+        │   └── page.tsx
+        └── (app)/
+            ├── layout.tsx
+            ├── dashboard/page.tsx
+            ├── products/
+            │   ├── page.tsx          ← list + search + filters
+            │   ├── new/page.tsx      ← add product (barcode prefill)
+            │   ├── [id]/page.tsx     ← edit product
+            │   └── labels/page.tsx   ← barcode label printing
+            ├── scan/page.tsx         ← USB scanner + camera scan
+            ├── stock/page.tsx        ← manual entry + history
+            ├── reports/page.tsx      ← ledger + Excel exports
+            └── settings/page.tsx     ← categories + suppliers
+```
+
+**Important:** `[id]` folder na name ma square brackets [] sathe j
+rakhvu — e Next.js no dynamic route che.
+
+**Note:** `(app)` folder na name ma kauns () સાથે જ રાખવું — e Next.js nu route group che, URL ma nathi aavtu.
+
+## Step 3: Environment variables
+
+`.env.local.example` ne `.env.local` name aapo ane Supabase dashboard
+(Settings → API) ma thi values bharo:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
+NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGci...
+```
+
+## Step 4: Run karo
+
+```bash
 npm run dev
 ```
 
-Open `http://localhost:3000`, create the first account, and sign in. The first registered account becomes admin automatically.
+http://localhost:3000 kholo → login page dekhashe →
+"Create account" thi signup karo → pachi Supabase SQL Editor ma:
 
-## Environment Variables
-
-```text
-MONGODB_URI=mongodb://...
-MONGODB_DB=inventory
-AUTH_SECRET=long-random-secret
+```sql
+update public.profiles set role = 'admin' where id = '<TAMARU_USER_UUID>';
 ```
 
-`MONGODB_DB` is optional. If it is not set, the app uses `inventory`.
+(UUID: Supabase → Authentication → Users ma malshe)
 
-## Railway Deploy
+## Camera scan note
 
-Add a MongoDB service in Railway, then set these variables on the app service:
+Browser camera fakt **HTTPS** (athva localhost) par j chale che.
+- Local testing: http://localhost:3000 par camera chalse ✓
+- Phone thi test karva mate: Railway par deploy karo (HTTPS auto male)
+  athva `ngrok` / `cloudflared tunnel` vaparo.
 
-```text
-MONGODB_URI=${{mongodb.MONGO_URL}}
-AUTH_SECRET=long-random-secret
-```
+USB barcode scanner ne koi restriction nathi — e keyboard ni jem j
+kaam kare che, koi pan device par chalse.
 
-Use a strong random `AUTH_SECRET` and keep it unchanged after users start logging in, because existing login cookies are signed with this value.
+## Railway deploy (pachi thi)
 
-## Build
-
-```bash
-npm run build
-```
-
-The app uses a MongoDB compatibility layer for older Supabase-named helper files, but production data is stored in MongoDB.
-
-## Camera Scan Note
-
-Browser camera access works only on HTTPS or localhost.
-
-- Local testing: camera works on `http://localhost:3000`
-- Railway deployment uses HTTPS automatically
-- USB barcode scanners work like keyboards and do not need camera permission
+Railway par deploy karti vakhte aa 2 environment variables
+Railway na Variables tab ma pan add karvana rahese.
+# invantory

@@ -3,20 +3,22 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/supabase/client";
-import type { POStatus, PurchaseOrder } from "@/lib/types";
+import type { Sale, SaleStatus } from "@/lib/types";
 
 const PAGE_SIZE = 50;
 
-interface PORow extends PurchaseOrder {
-  suppliers: { name: string } | null;
+interface SaleRow extends Sale {
+  customers: { name: string } | null;
 }
 
-export default function PurchasesPage() {
+export default function SalesPage() {
   const supabase = createClient();
-  const [rows, setRows] = useState<PORow[]>([]);
-  const [statusFilter, setStatusFilter] = useState<"" | POStatus>("");
+  const [rows, setRows] = useState<SaleRow[]>([]);
+  const [statusFilter, setStatusFilter] = useState<"" | SaleStatus>("");
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
+  const [todayTotal, setTodayTotal] = useState(0);
+  const [monthTotal, setMonthTotal] = useState(0);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -26,16 +28,35 @@ export default function PurchasesPage() {
   useEffect(() => {
     async function load() {
       setLoading(true);
+
       let query = supabase
-        .from("purchase_orders")
-        .select("*, suppliers(name)", { count: "exact" })
+        .from("sales")
+        .select("*, customers(name)", { count: "exact" })
         .order("created_at", { ascending: false })
         .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
       if (statusFilter) query = query.eq("status", statusFilter);
 
-      const { data, count } = await query;
-      setRows((data ?? []) as PORow[]);
+      const today = new Date().toISOString().slice(0, 10);
+      const monthStart = today.slice(0, 8) + "01";
+
+      const [{ data, count }, { data: todayRows }, { data: monthRows }] =
+        await Promise.all([
+          query,
+          supabase.from("sales").select("grand_total").gte("created_at", today),
+          supabase
+            .from("sales")
+            .select("grand_total")
+            .gte("created_at", monthStart),
+        ]);
+
+      setRows((data ?? []) as SaleRow[]);
       setTotal(count ?? 0);
+      setTodayTotal(
+        (todayRows ?? []).reduce((s, r) => s + Number(r.grand_total), 0)
+      );
+      setMonthTotal(
+        (monthRows ?? []).reduce((s, r) => s + Number(r.grand_total), 0)
+      );
       setLoading(false);
     }
     load();
@@ -44,29 +65,44 @@ export default function PurchasesPage() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const inr = (n: number) =>
-    "₹" + Number(n).toLocaleString("en-IN", { maximumFractionDigits: 0 });
+    "₹" + n.toLocaleString("en-IN", { maximumFractionDigits: 0 });
 
-  const statusBadge = (s: POStatus) =>
-    s === "received"
+  const statusBadge = (s: SaleStatus) =>
+    s === "paid"
       ? "bg-emerald-50 text-emerald-700"
-      : s === "cancelled"
-        ? "bg-stone-100 text-stone-500"
+      : s === "unpaid"
+        ? "bg-red-50 text-red-700"
         : "bg-amber-50 text-amber-700";
 
   return (
     <div>
       <div className="flex items-center justify-between">
-        <h1 className="text-xl font-semibold text-stone-900">Purchases</h1>
+        <h1 className="text-xl font-semibold text-stone-900">Sales</h1>
         <Link
-          href="/purchases/new"
+          href="/sales/new"
           className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 transition-colors"
         >
-          + New PO
+          + New sale
         </Link>
       </div>
 
+      <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className="rounded-2xl border border-stone-200 bg-white p-4">
+          <p className="text-sm text-stone-500">Today&apos;s sales</p>
+          <p className="mt-1 text-2xl font-semibold text-stone-900">
+            {inr(todayTotal)}
+          </p>
+        </div>
+        <div className="rounded-2xl border border-stone-200 bg-white p-4">
+          <p className="text-sm text-stone-500">This month</p>
+          <p className="mt-1 text-2xl font-semibold text-stone-900">
+            {inr(monthTotal)}
+          </p>
+        </div>
+      </div>
+
       <div className="mt-4 flex gap-2">
-        {(["", "ordered", "received", "cancelled"] as const).map((s) => (
+        {(["", "paid", "unpaid", "partial"] as const).map((s) => (
           <button
             key={s || "all"}
             onClick={() => setStatusFilter(s)}
@@ -88,39 +124,40 @@ export default function PurchasesPage() {
           </p>
         ) : rows.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-stone-500">
-            No purchase orders yet. Supplier pase thi mangavva &quot;+ New
-            PO&quot; dabavo.
+            No sales yet. Pehli sale banavva &quot;+ New sale&quot; dabavo.
           </p>
         ) : (
           <ul className="divide-y divide-stone-100">
-            {rows.map((po) => (
-              <li key={po.id}>
+            {rows.map((s) => (
+              <li key={s.id}>
                 <Link
-                  href={`/purchases/${po.id}`}
+                  href={`/sales/${s.id}`}
                   className="flex items-center justify-between px-4 py-3 hover:bg-stone-50 transition-colors"
                 >
                   <div className="min-w-0">
                     <p className="text-sm font-medium text-stone-900">
-                      {po.po_no}
+                      {s.invoice_no}
                       <span className="ml-2 font-normal text-stone-500">
-                        {po.suppliers?.name ?? "No supplier"}
+                        {s.customers?.name ?? "Walk-in"}
                       </span>
                     </p>
                     <p className="text-xs text-stone-500">
-                      {new Date(po.created_at).toLocaleString("en-IN", {
+                      {new Date(s.created_at).toLocaleString("en-IN", {
                         dateStyle: "medium",
                         timeStyle: "short",
                       })}
+                      {" · "}
+                      <span className="capitalize">{s.payment_method}</span>
                     </p>
                   </div>
                   <div className="ml-3 flex shrink-0 items-center gap-2">
                     <span
-                      className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${statusBadge(po.status)}`}
+                      className={`rounded-full px-2.5 py-1 text-xs font-semibold capitalize ${statusBadge(s.status)}`}
                     >
-                      {po.status}
+                      {s.status}
                     </span>
                     <span className="text-sm font-semibold text-stone-900">
-                      {inr(po.total)}
+                      {inr(Number(s.grand_total))}
                     </span>
                   </div>
                 </Link>
@@ -133,7 +170,7 @@ export default function PurchasesPage() {
       {!loading && total > PAGE_SIZE && (
         <div className="mt-3 flex items-center justify-between">
           <p className="text-xs text-stone-500">
-            {total.toLocaleString("en-IN")} POs · page {page + 1} of{" "}
+            {total.toLocaleString("en-IN")} invoices · page {page + 1} of{" "}
             {totalPages}
           </p>
           <div className="flex gap-2">

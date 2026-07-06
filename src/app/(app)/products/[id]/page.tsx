@@ -8,7 +8,7 @@ export default function EditProductPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  // Next.js 15 passes params as a Promise; use() handles both versions.
+  // Next.js 15 ma params Promise che; use() banne version handle kare
   const { id } = use(params);
   return <ProductForm productId={id} />;
 }

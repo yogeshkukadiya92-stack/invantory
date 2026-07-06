@@ -39,7 +39,7 @@ export default function LabelsPage() {
     );
   }, [products, search]);
 
-  // Flatten selected labels for the print sheet
+  // Print sheet mate flat label list (copies expand karine)
   const labels = useMemo(() => {
     const list: { product: StockRow; key: string }[] = [];
     for (const p of products) {
@@ -51,7 +51,7 @@ export default function LabelsPage() {
     return list;
   }, [products, selection]);
 
-  // Draw barcodes after labels render
+  // Labels render thaya pachi barcodes draw karo
   useEffect(() => {
     for (const { product, key } of labels) {
       const el = document.getElementById(`bc-${key}`);
@@ -109,7 +109,7 @@ export default function LabelsPage() {
           disabled={totalLabels === 0}
           className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
         >
-          Print {totalLabels > 0 ? `(${totalLabels})` : ""}
+          🖨 Print {totalLabels > 0 ? `(${totalLabels})` : ""}
         </button>
       </div>
 
@@ -131,7 +131,7 @@ export default function LabelsPage() {
                 onChange={(e) => setShowPrice(e.target.checked)}
                 className="h-4 w-4 accent-emerald-700"
               />
-              Show price on label
+              Label par price batavo
             </label>
           </div>
           <ul className="max-h-[420px] divide-y divide-stone-100 overflow-y-auto">
@@ -179,7 +179,7 @@ export default function LabelsPage() {
             })}
             {filtered.length === 0 && (
               <li className="px-3 py-6 text-center text-sm text-stone-500">
-                No products with barcodes. Add a barcode to a product first.
+                Barcode vala products nathi. Pehla product ma barcode add karo.
               </li>
             )}
           </ul>
@@ -189,13 +189,13 @@ export default function LabelsPage() {
         <section className="rounded-2xl border border-stone-200 bg-white p-5">
           <h2 className="text-sm font-semibold text-stone-900">Preview</h2>
           <p className="mt-1 text-xs text-stone-500">
-            The labels shown below will be printed. A4 uses 3 columns. For a
-            thermal label printer, select the paper size in the browser print
-            settings.
+            Niche je labels dekhay che e j print thashe — A4 sheet par 3
+            columns ma. Thermal label printer hoy to browser ni print
+            settings ma paper size select karjo.
           </p>
           <p className="mt-2 text-xs text-stone-400">
-            Tip: In the print dialog, use &quot;Margins: None&quot; and
-            &quot;Scale: 100%&quot; for best results.
+            Tip: Print dialog ma &quot;Margins: None&quot; ane
+            &quot;Scale: 100%&quot; rakhvu best rahese.
           </p>
         </section>
       </div>
@@ -215,7 +215,7 @@ export default function LabelsPage() {
             </p>
             {showPrice && (
               <p className="text-[11px] font-medium text-stone-700">
-                INR {Number(product.selling_price).toLocaleString("en-IN")}
+                ₹{Number(product.selling_price).toLocaleString("en-IN")}
               </p>
             )}
             <svg id={`bc-${key}`} className="mt-1 max-w-full" />
@@ -223,7 +223,7 @@ export default function LabelsPage() {
         ))}
         {totalLabels === 0 && (
           <p className="col-span-full rounded-2xl border border-dashed border-stone-300 py-10 text-center text-sm text-stone-400 print:hidden">
-            Select products - labels will preview here
+            Products select karo — labels ahi preview thashe
           </p>
         )}
       </div>

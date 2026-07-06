@@ -7,8 +7,8 @@ import { createClient } from "@/lib/supabase/client";
 import type { Category, Product } from "@/lib/types";
 
 interface Props {
-  productId?: string; // edit mode when present
-  initialBarcode?: string; // prefill when opened from scan
+  productId?: string; // hoy to edit mode
+  initialBarcode?: string; // scan par thi aavya hoy to prefill
 }
 
 export function ProductForm({ productId, initialBarcode }: Props) {
@@ -21,6 +21,10 @@ export function ProductForm({ productId, initialBarcode }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const [imageUrl, setImageUrl] = useState<string | null>(null);
+  const [imageFile, setImageFile] = useState<File | null>(null);
+  const [imagePreview, setImagePreview] = useState<string | null>(null);
+
   const [form, setForm] = useState({
     name: "",
     sku: "",
@@ -30,6 +34,8 @@ export function ProductForm({ productId, initialBarcode }: Props) {
     purchase_price: "",
     selling_price: "",
     min_stock_level: "0",
+    hsn_code: "",
+    gst_rate: "0",
   });
 
   useEffect(() => {
@@ -56,7 +62,10 @@ export function ProductForm({ productId, initialBarcode }: Props) {
             purchase_price: String(data.purchase_price),
             selling_price: String(data.selling_price),
             min_stock_level: String(data.min_stock_level),
+            hsn_code: data.hsn_code ?? "",
+            gst_rate: String(data.gst_rate ?? 0),
           });
+          setImageUrl(data.image_url);
         }
         setLoading(false);
       }
@@ -77,7 +86,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
           margin: 8,
         });
       } catch {
-        // invalid barcode value, skip preview
+        // invalid barcode value — preview skip
       }
     }
   }, [form.barcode]);
@@ -102,7 +111,26 @@ export function ProductForm({ productId, initialBarcode }: Props) {
     setSaving(true);
     setError(null);
 
+    // Navi image select kari hoy to pehla storage ma upload karo
+    let finalImageUrl = imageUrl;
+    if (imageFile) {
+      const ext = imageFile.name.split(".").pop() || "jpg";
+      const path = `${crypto.randomUUID()}.${ext}`;
+      const { error: uploadError } = await supabase.storage
+        .from("product-images")
+        .upload(path, imageFile, { upsert: false });
+      if (uploadError) {
+        setError("Image upload fail thayu: " + uploadError.message);
+        setSaving(false);
+        return;
+      }
+      finalImageUrl = supabase.storage
+        .from("product-images")
+        .getPublicUrl(path).data.publicUrl;
+    }
+
     const payload = {
+      image_url: finalImageUrl,
       name: form.name.trim(),
       sku: form.sku.trim() || null,
       barcode: form.barcode.trim() || null,
@@ -111,20 +139,19 @@ export function ProductForm({ productId, initialBarcode }: Props) {
       purchase_price: Number(form.purchase_price) || 0,
       selling_price: Number(form.selling_price) || 0,
       min_stock_level: Number(form.min_stock_level) || 0,
+      hsn_code: form.hsn_code.trim() || null,
+      gst_rate: Number(form.gst_rate) || 0,
     };
 
-    const response = await fetch(productId ? `/api/products/${productId}` : "/api/products", {
-      method: productId ? "PUT" : "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-    });
-    const result = await response.json();
+    const { error } = productId
+      ? await supabase.from("products").update(payload).eq("id", productId)
+      : await supabase.from("products").insert(payload);
 
-    if (!response.ok) {
+    if (error) {
       setError(
-        String(result.error ?? "").includes("exists")
-          ? "This barcode or SKU already exists"
-          : result.error ?? "Could not save product"
+        error.message.includes("duplicate")
+          ? "Aa barcode ke SKU already exist kare che"
+          : error.message
       );
       setSaving(false);
       return;
@@ -135,9 +162,12 @@ export function ProductForm({ productId, initialBarcode }: Props) {
 
   async function handleDeactivate() {
     if (!productId) return;
-    if (!confirm("Deactivate this product? Existing records will be kept."))
+    if (!confirm("Product ne deactivate karvu che? (Data delete nahi thay)"))
       return;
-    await fetch(`/api/products/${productId}`, { method: "DELETE" });
+    await supabase
+      .from("products")
+      .update({ is_active: false })
+      .eq("id", productId);
     router.push("/products");
     router.refresh();
   }
@@ -156,6 +186,54 @@ export function ProductForm({ productId, initialBarcode }: Props) {
       </h1>
 
       <div className="mt-4 space-y-4 rounded-2xl border border-stone-200 bg-white p-5">
+        <div className="flex items-center gap-4">
+          {imagePreview || imageUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={imagePreview ?? imageUrl ?? ""}
+              alt=""
+              className="h-20 w-20 rounded-xl border border-stone-200 object-cover"
+            />
+          ) : (
+            <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-stone-100 text-2xl text-stone-400">
+              📦
+            </div>
+          )}
+          <div className="flex flex-col gap-1.5">
+            <label className="cursor-pointer rounded-lg border border-stone-300 px-3 py-1.5 text-center text-sm text-stone-700 hover:bg-stone-50">
+              {imageUrl || imagePreview ? "Change photo" : "Add photo"}
+              <input
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (!f) return;
+                  if (f.size > 3 * 1024 * 1024) {
+                    setError("Image 3MB thi nani rakho");
+                    return;
+                  }
+                  setImageFile(f);
+                  setImagePreview(URL.createObjectURL(f));
+                }}
+              />
+            </label>
+            {(imageUrl || imagePreview) && (
+              <button
+                type="button"
+                onClick={() => {
+                  setImageFile(null);
+                  setImagePreview(null);
+                  setImageUrl(null);
+                }}
+                className="text-xs text-red-500 hover:text-red-700"
+              >
+                Remove
+              </button>
+            )}
+          </div>
+        </div>
+
         <div>
           <label className={label}>Product name *</label>
           <input
@@ -173,7 +251,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
               className={input}
               value={form.barcode}
               onChange={(e) => set("barcode", e.target.value)}
-              placeholder="Scan barcode or click Generate"
+              placeholder="Scan karo athva Generate dabavo"
             />
             <button
               type="button"
@@ -207,7 +285,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
               value={form.category_id}
               onChange={(e) => set("category_id", e.target.value)}
             >
-              <option value="">None</option>
+              <option value="">— None —</option>
               {categories.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.name}
@@ -219,7 +297,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={label}>Purchase price (INR)</label>
+            <label className={label}>Purchase price (₹)</label>
             <input
               type="number"
               inputMode="decimal"
@@ -230,7 +308,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
             />
           </div>
           <div>
-            <label className={label}>Selling price (INR)</label>
+            <label className={label}>Selling price (₹)</label>
             <input
               type="number"
               inputMode="decimal"
@@ -239,6 +317,32 @@ export function ProductForm({ productId, initialBarcode }: Props) {
               onChange={(e) => set("selling_price", e.target.value)}
               placeholder="0.00"
             />
+          </div>
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            <label className={label}>HSN code</label>
+            <input
+              className={input}
+              value={form.hsn_code}
+              onChange={(e) => set("hsn_code", e.target.value)}
+              placeholder="GST invoice mate"
+            />
+          </div>
+          <div>
+            <label className={label}>GST rate</label>
+            <select
+              className={input}
+              value={form.gst_rate}
+              onChange={(e) => set("gst_rate", e.target.value)}
+            >
+              <option value="0">0% (exempt)</option>
+              <option value="5">5%</option>
+              <option value="12">12%</option>
+              <option value="18">18%</option>
+              <option value="28">28%</option>
+            </select>
           </div>
         </div>
 
