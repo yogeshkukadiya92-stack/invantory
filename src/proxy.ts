@@ -5,8 +5,15 @@ export async function proxy(request: NextRequest) {
   let response = NextResponse.next({ request });
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const isLoginPage = request.nextUrl.pathname.startsWith("/login");
 
   if (!url || !anonKey) {
+    if (!isLoginPage) {
+      const url = request.nextUrl.clone();
+      url.pathname = "/login";
+      url.searchParams.set("setup", "missing");
+      return NextResponse.redirect(url);
+    }
     return response;
   }
 
@@ -37,8 +44,6 @@ export async function proxy(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const isLoginPage = request.nextUrl.pathname.startsWith("/login");
 
   // Login nathi karyu ane protected page par che → /login par mokli do
   if (!user && !isLoginPage) {

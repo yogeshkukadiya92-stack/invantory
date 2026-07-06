@@ -4,7 +4,11 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/supabase/client";
 
-export function LoginForm() {
+export function LoginForm({
+  isSupabaseConfigured,
+}: {
+  isSupabaseConfigured: boolean;
+}) {
   const router = useRouter();
 
   const [mode, setMode] = useState<"signin" | "signup">("signin");
@@ -91,6 +95,14 @@ export function LoginForm() {
         </div>
 
         <div className="rounded-2xl bg-white p-6 shadow-sm border border-stone-200">
+          {!isSupabaseConfigured && (
+            <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              Supabase is not configured on this deployment. Add
+              NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY, then
+              redeploy.
+            </div>
+          )}
+
           {mode === "signup" && (
             <div className="mb-4">
               <label
