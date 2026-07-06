@@ -12,6 +12,7 @@ const navItems = [
   { href: "/scan", label: "Scan" },
   { href: "/stock", label: "Stock" },
   { href: "/customers", label: "Customers" },
+  { href: "/analytics", label: "Analytics" },
   { href: "/reports", label: "Reports" },
   { href: "/settings", label: "Settings" },
 ];

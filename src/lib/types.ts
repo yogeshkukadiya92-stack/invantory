@@ -105,6 +105,31 @@ export interface CreateSaleResult {
   grand_total: number;
 }
 
+export interface SaleReturn {
+  id: string;
+  return_no: string;
+  sale_id: string;
+  reason: string | null;
+  subtotal: number;
+  tax_total: number;
+  total: number;
+  created_by: string;
+  created_at: string;
+}
+
+export interface SaleReturnItem {
+  id: string;
+  return_id: string;
+  sale_item_id: string;
+  product_id: string | null;
+  product_name: string;
+  unit: string;
+  quantity: number;
+  price: number;
+  gst_rate: number;
+  line_total: number;
+}
+
 export type POStatus = "ordered" | "received" | "cancelled";
 
 export interface PurchaseOrder {

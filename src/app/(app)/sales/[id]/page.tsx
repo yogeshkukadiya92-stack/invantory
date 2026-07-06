@@ -8,6 +8,7 @@ import type {
   Customer,
   Sale,
   SaleItem,
+  SaleReturn,
 } from "@/lib/types";
 
 export default function SaleDetailPage({
@@ -22,16 +23,24 @@ export default function SaleDetailPage({
   const [items, setItems] = useState<SaleItem[]>([]);
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [business, setBusiness] = useState<BusinessSettings | null>(null);
+  const [returns, setReturns] = useState<SaleReturn[]>([]);
   const [soldBy, setSoldBy] = useState("");
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
-      const [{ data: s }, { data: li }, { data: bs }] = await Promise.all([
-        supabase.from("sales").select("*").eq("id", id).single(),
-        supabase.from("sale_items").select("*").eq("sale_id", id),
-        supabase.from("business_settings").select("*").eq("id", 1).single(),
-      ]);
+      const [{ data: s }, { data: li }, { data: bs }, { data: rets }] =
+        await Promise.all([
+          supabase.from("sales").select("*").eq("id", id).single(),
+          supabase.from("sale_items").select("*").eq("sale_id", id),
+          supabase.from("business_settings").select("*").eq("id", 1).single(),
+          supabase
+            .from("sale_returns")
+            .select("*")
+            .eq("sale_id", id)
+            .order("created_at"),
+        ]);
+      setReturns((rets ?? []) as SaleReturn[]);
       const saleData = s as Sale | null;
       setSale(saleData);
       setItems((li ?? []) as SaleItem[]);
@@ -94,6 +103,12 @@ export default function SaleDetailPage({
           ← Sales
         </Link>
         <div className="flex gap-2">
+          <Link
+            href={`/sales/${sale.id}/return`}
+            className="rounded-lg border border-amber-600 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50"
+          >
+            ↩ Return
+          </Link>
           <button
             onClick={() => {
               const lines = [
@@ -298,6 +313,43 @@ export default function SaleDetailPage({
           Thank you for your business!
         </p>
       </div>
+
+      {/* RETURNS / CREDIT NOTES */}
+      {returns.length > 0 && (
+        <div className="no-print mt-4 rounded-2xl border border-amber-200 bg-white">
+          <div className="border-b border-stone-100 px-4 py-3">
+            <h2 className="text-sm font-semibold text-stone-900">
+              ↩ Returns against this invoice
+            </h2>
+          </div>
+          <ul className="divide-y divide-stone-100">
+            {returns.map((r) => (
+              <li key={r.id}>
+                <Link
+                  href={`/returns/${r.id}`}
+                  className="flex items-center justify-between px-4 py-3 hover:bg-stone-50"
+                >
+                  <div>
+                    <p className="text-sm font-medium text-stone-900">
+                      {r.return_no}
+                    </p>
+                    <p className="text-xs text-stone-500">
+                      {new Date(r.created_at).toLocaleString("en-IN", {
+                        dateStyle: "medium",
+                        timeStyle: "short",
+                      })}
+                      {r.reason ? ` · ${r.reason}` : ""}
+                    </p>
+                  </div>
+                  <span className="text-sm font-semibold text-amber-700">
+                    −{inr(r.total)}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </div>
   );
 }
