@@ -36,7 +36,7 @@ export default async function AppLayout({
     .single<Profile>();
 
   return (
-    <div className="min-h-screen bg-stone-100">
+    <div className="min-h-dvh bg-stone-100">
       <header className="sticky top-0 z-10 border-b border-stone-200 bg-white">
         <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
           <div className="flex items-center gap-3">
@@ -48,7 +48,7 @@ export default async function AppLayout({
             </span>
           </div>
 
-          <nav className="hidden md:flex items-center gap-1">
+          <nav className="hidden lg:flex items-center gap-1">
             {navItems.map((item) => (
               <Link
                 key={item.href}
@@ -75,7 +75,7 @@ export default async function AppLayout({
       </header>
 
       {/* Mobile bottom nav — scanning motabhage phone thi thashe */}
-      <nav className="fixed bottom-0 left-0 right-0 z-10 flex overflow-x-auto border-t border-stone-200 bg-white md:hidden">
+      <nav className="fixed bottom-0 left-0 right-0 z-10 flex overflow-x-auto border-t border-stone-200 bg-white pb-[env(safe-area-inset-bottom)] lg:hidden">
         {navItems.map((item) => (
           <Link
             key={item.href}
@@ -87,7 +87,7 @@ export default async function AppLayout({
         ))}
       </nav>
 
-      <main className="mx-auto max-w-6xl px-4 py-6 pb-24 md:pb-6">
+      <main className="mx-auto max-w-6xl px-4 py-6 pb-28 lg:pb-6">
         {children}
       </main>
     </div>

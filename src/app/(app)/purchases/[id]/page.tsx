@@ -58,6 +58,7 @@ export default function PurchaseDetailPage({
   }, [load]);
 
   async function receive() {
+    if (busy) return;
     if (
       !confirm(
         "Goods receive karva che? Badhi items no stock automatic 'in' thashe."
@@ -79,6 +80,7 @@ export default function PurchaseDetailPage({
   }
 
   async function cancel() {
+    if (busy) return;
     if (!confirm("PO cancel karvo che?")) return;
     setBusy(true);
     setError(null);
@@ -116,7 +118,7 @@ export default function PurchaseDetailPage({
 
   return (
     <div className="mx-auto max-w-2xl">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Link
           href="/purchases"
           className="text-sm text-stone-500 hover:text-stone-700"
@@ -124,7 +126,7 @@ export default function PurchaseDetailPage({
           ← Purchases
         </Link>
         {po.status === "ordered" && (
-          <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
             {locations.length > 1 && (
               <select
                 className="rounded-lg border border-stone-300 bg-white px-2 py-2 text-sm"
@@ -192,36 +194,38 @@ export default function PurchaseDetailPage({
           </span>
         </div>
 
-        <table className="mt-4 w-full text-sm">
-          <thead>
-            <tr className="border-b border-stone-200 text-left text-xs text-stone-500">
-              <th className="py-2 font-medium">#</th>
-              <th className="py-2 font-medium">Item</th>
-              <th className="py-2 text-right font-medium">Qty</th>
-              <th className="py-2 text-right font-medium">Cost</th>
-              <th className="py-2 text-right font-medium">Total</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-stone-100">
-            {items.map((it, idx) => (
-              <tr key={it.id}>
-                <td className="py-2 text-stone-500">{idx + 1}</td>
-                <td className="py-2 font-medium text-stone-900">
-                  {it.product_name}
-                </td>
-                <td className="py-2 text-right text-stone-700">
-                  {it.quantity} {it.unit}
-                </td>
-                <td className="py-2 text-right text-stone-700">
-                  {inr(it.cost)}
-                </td>
-                <td className="py-2 text-right font-medium text-stone-900">
-                  {inr(it.line_total)}
-                </td>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[500px] text-sm">
+            <thead>
+              <tr className="border-b border-stone-200 text-left text-xs text-stone-500">
+                <th className="py-2 font-medium">#</th>
+                <th className="py-2 font-medium">Item</th>
+                <th className="py-2 text-right font-medium">Qty</th>
+                <th className="py-2 text-right font-medium">Cost</th>
+                <th className="py-2 text-right font-medium">Total</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-stone-100">
+              {items.map((it, idx) => (
+                <tr key={it.id}>
+                  <td className="py-2 text-stone-500">{idx + 1}</td>
+                  <td className="py-2 font-medium text-stone-900">
+                    {it.product_name}
+                  </td>
+                  <td className="py-2 text-right text-stone-700">
+                    {it.quantity} {it.unit}
+                  </td>
+                  <td className="py-2 text-right text-stone-700">
+                    {inr(it.cost)}
+                  </td>
+                  <td className="py-2 text-right font-medium text-stone-900">
+                    {inr(it.line_total)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
         <div className="mt-3 flex justify-between border-t border-stone-200 pt-3 text-base font-bold text-stone-900">
           <span>Total</span>

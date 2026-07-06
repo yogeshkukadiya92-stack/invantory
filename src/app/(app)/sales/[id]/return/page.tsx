@@ -94,6 +94,7 @@ export default function SaleReturnPage({
   const refundTotal = refundSubtotal + refundTax;
 
   async function saveReturn() {
+    if (saving) return;
     if (selected.length === 0) {
       setError("Ochha ma ochhi 1 item ni return quantity nakho");
       return;
@@ -101,6 +102,10 @@ export default function SaleReturnPage({
     for (const it of selected) {
       const qty = parseFloat(it.returnQty);
       const max = Number(it.quantity) - it.alreadyReturned;
+      if (!qty || qty <= 0) {
+        setError(`"${it.product_name}" ni return quantity valid nathi`);
+        return;
+      }
       if (qty > max) {
         setError(`"${it.product_name}" ma vadhu ma vadhu ${max} return thai shake`);
         return;
@@ -145,7 +150,7 @@ export default function SaleReturnPage({
 
   return (
     <div className="mx-auto max-w-2xl">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Link
           href={`/sales/${id}`}
           className="text-sm text-stone-500 hover:text-stone-700"
@@ -177,7 +182,8 @@ export default function SaleReturnPage({
       </p>
 
       <div className="mt-4 overflow-hidden rounded-2xl border border-stone-200 bg-white">
-        <table className="w-full text-sm">
+        <div className="overflow-x-auto">
+        <table className="w-full min-w-[520px] text-sm">
           <thead>
             <tr className="border-b border-stone-100 bg-stone-50 text-left text-xs text-stone-500">
               <th className="px-4 py-2 font-medium">Item</th>
@@ -221,6 +227,7 @@ export default function SaleReturnPage({
             })}
           </tbody>
         </table>
+        </div>
       </div>
 
       <input

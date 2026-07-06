@@ -143,6 +143,7 @@ export default function StockPage() {
   const selectedProduct = products.find((p) => p.product_id === form.product_id);
 
   async function handleSubmit() {
+    if (busy) return;
     if (!form.product_id) {
       setMessage({ kind: "err", text: "Product select karo" });
       return;
@@ -192,8 +193,13 @@ export default function StockPage() {
   }
 
   async function handleTransfer() {
+    if (busy) return;
     if (!transfer.product_id || !transfer.from_location || !transfer.to_location) {
       setTransferMsg({ kind: "err", text: "Product ane locations select karo" });
+      return;
+    }
+    if (transfer.from_location === transfer.to_location) {
+      setTransferMsg({ kind: "err", text: "From ane To location alag hovi joie" });
       return;
     }
     const qty = parseInt(transfer.quantity, 10);

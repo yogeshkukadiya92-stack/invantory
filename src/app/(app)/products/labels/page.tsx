@@ -102,7 +102,7 @@ export default function LabelsPage() {
         }
       `}</style>
 
-      <div className="flex items-center justify-between print:hidden">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between print:hidden">
         <h1 className="text-xl font-semibold text-stone-900">Print labels</h1>
         <button
           onClick={() => window.print()}

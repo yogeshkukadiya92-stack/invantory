@@ -74,6 +74,12 @@ export function ProductForm({ productId, initialBarcode }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [productId]);
 
+  useEffect(() => {
+    return () => {
+      if (imagePreview) URL.revokeObjectURL(imagePreview);
+    };
+  }, [imagePreview]);
+
   // Barcode preview render
   useEffect(() => {
     if (barcodeSvgRef.current && form.barcode.trim()) {
@@ -104,6 +110,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
   }
 
   async function handleSave() {
+    if (saving) return;
     if (!form.name.trim()) {
       setError("Product name is required");
       return;
@@ -161,13 +168,20 @@ export function ProductForm({ productId, initialBarcode }: Props) {
   }
 
   async function handleDeactivate() {
-    if (!productId) return;
+    if (!productId || saving) return;
     if (!confirm("Product ne deactivate karvu che? (Data delete nahi thay)"))
       return;
-    await supabase
+    setSaving(true);
+    setError(null);
+    const { error } = await supabase
       .from("products")
       .update({ is_active: false })
       .eq("id", productId);
+    if (error) {
+      setError(error.message);
+      setSaving(false);
+      return;
+    }
     router.push("/products");
     router.refresh();
   }
@@ -240,7 +254,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
             className={input}
             value={form.name}
             onChange={(e) => set("name", e.target.value)}
-            placeholder="e.g. Parle-G 100g"
+            placeholder="e.g. Product 100g"
           />
         </div>
 
@@ -385,6 +399,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
           {productId && (
             <button
               onClick={handleDeactivate}
+              disabled={saving}
               className="rounded-lg border border-red-200 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
             >
               Deactivate

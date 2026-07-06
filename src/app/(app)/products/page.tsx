@@ -72,24 +72,24 @@ export default function ProductsPage() {
 
   return (
     <div>
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-semibold text-stone-900">Products</h1>
-        <div className="flex gap-2">
+        <div className="grid grid-cols-3 gap-2 sm:flex">
           <Link
             href="/products/import"
-            className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors"
+            className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-center text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors"
           >
             ⬆ Import
           </Link>
           <Link
             href="/products/labels"
-            className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors"
+            className="rounded-lg border border-stone-300 bg-white px-4 py-2 text-center text-sm font-medium text-stone-700 hover:bg-stone-50 transition-colors"
           >
             🖨 Labels
           </Link>
           <Link
             href="/products/new"
-            className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 transition-colors"
+            className="rounded-lg bg-emerald-700 px-4 py-2 text-center text-sm font-medium text-white hover:bg-emerald-800 transition-colors"
           >
             + Add product
           </Link>

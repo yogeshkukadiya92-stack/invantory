@@ -144,6 +144,7 @@ export default function ScanPage() {
 
   // ---------- STOCK ENTRY ----------
   async function recordMovement(type: "in" | "out") {
+    if (busy) return;
     if (!product) return;
     const qty = parseInt(quantity, 10);
     if (!qty || qty <= 0) {

@@ -179,14 +179,29 @@ export default function NewSalePage() {
   const grandTotal = Math.max(0, subtotal + taxTotal - discountNum);
 
   async function saveSale() {
+    if (saving) return;
     if (lines.length === 0) {
       setError("Ochha ma ochhi 1 item add karo");
       return;
     }
+    if (discountNum < 0) {
+      setError("Discount negative na hoi shake");
+      return;
+    }
+    const paid = paidFull ? grandTotal : parseFloat(paidAmount) || 0;
+    if (!paidFull && (paid < 0 || paid > grandTotal)) {
+      setError("Paid amount 0 thi total sudhi hovu joie");
+      return;
+    }
     for (const l of lines) {
       const qty = parseFloat(l.quantity);
+      const price = parseFloat(l.price);
       if (!qty || qty <= 0) {
         setError(`"${l.name}" ni quantity valid nathi`);
+        return;
+      }
+      if (Number.isNaN(price) || price < 0) {
+        setError(`"${l.name}" ni price valid nathi`);
         return;
       }
       if (qty > l.stock) {
@@ -206,7 +221,7 @@ export default function NewSalePage() {
       p_customer_id: customerId || null,
       p_discount: discountNum,
       p_payment_method: paymentMethod,
-      p_paid_amount: paidFull ? null : parseFloat(paidAmount) || 0,
+      p_paid_amount: paidFull ? null : paid,
       p_note: note.trim() || null,
       p_location_id: locationId || null,
     });
@@ -227,7 +242,7 @@ export default function NewSalePage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-semibold text-stone-900">New sale</h1>
         {locations.length > 1 && (
           <select

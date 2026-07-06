@@ -102,6 +102,7 @@ export default function NewPurchasePage() {
   );
 
   async function savePO() {
+    if (saving) return;
     if (lines.length === 0) {
       setError("Ochha ma ochhi 1 item add karo");
       return;
@@ -109,6 +110,11 @@ export default function NewPurchasePage() {
     for (const l of lines) {
       if (!(parseFloat(l.quantity) > 0)) {
         setError(`"${l.name}" ni quantity valid nathi`);
+        return;
+      }
+      const cost = parseFloat(l.cost);
+      if (Number.isNaN(cost) || cost < 0) {
+        setError(`"${l.name}" no cost valid nathi`);
         return;
       }
     }

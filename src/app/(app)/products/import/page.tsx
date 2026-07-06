@@ -49,22 +49,7 @@ export default function ImportProductsPage() {
   const [error, setError] = useState<string | null>(null);
 
   function downloadTemplate() {
-    const ws = XLSX.utils.aoa_to_sheet([
-      TEMPLATE_COLUMNS,
-      [
-        "Parle-G 100g",
-        "PG100",
-        "8901719104046",
-        "Biscuits",
-        "pcs",
-        8,
-        10,
-        20,
-        "1905",
-        18,
-        100,
-      ],
-    ]);
+    const ws = XLSX.utils.aoa_to_sheet([TEMPLATE_COLUMNS]);
     ws["!cols"] = TEMPLATE_COLUMNS.map(() => ({ wch: 14 }));
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, "Products");
@@ -161,6 +146,7 @@ export default function ImportProductsPage() {
   }
 
   async function runImport() {
+    if (importing) return;
     const valid = rows.filter((r) => !r.error);
     if (valid.length === 0) {
       setError("Import karva layak koi row nathi");
@@ -172,6 +158,11 @@ export default function ImportProductsPage() {
     const {
       data: { user },
     } = await supabase.auth.getUser();
+    if (!user) {
+      setError("Your session expired. Please sign in again before importing.");
+      setImporting(false);
+      return;
+    }
 
     // Categories: name → id map; missing categories banavva try karo
     const { data: cats } = await supabase.from("categories").select("*");
@@ -243,7 +234,7 @@ export default function ImportProductsPage() {
             type: "in" as const,
             quantity: src.opening_stock,
             reason: "Opening stock (import)",
-            created_by: user!.id,
+            created_by: user.id,
           },
         ];
       });
@@ -271,7 +262,7 @@ export default function ImportProductsPage() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <div className="flex items-center justify-between">
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
         <h1 className="text-xl font-semibold text-stone-900">
           Bulk import products
         </h1>
@@ -345,7 +336,7 @@ export default function ImportProductsPage() {
 
       {rows.length > 0 && (
         <>
-          <div className="mt-4 flex items-center justify-between">
+          <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-stone-600">
               <span className="font-semibold text-emerald-700">
                 {validCount} ready

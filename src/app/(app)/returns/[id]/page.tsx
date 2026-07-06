@@ -88,7 +88,7 @@ export default function ReturnDetailPage({
         }
       `}</style>
 
-      <div className="no-print flex items-center justify-between">
+      <div className="no-print flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
         <Link
           href={sale ? `/sales/${sale.id}` : "/sales"}
           className="text-sm text-stone-500 hover:text-stone-700"
@@ -154,40 +154,42 @@ export default function ReturnDetailPage({
           )}
         </div>
 
-        <table className="mt-4 w-full text-sm">
-          <thead>
-            <tr className="border-y border-stone-200 text-left text-xs text-stone-500">
-              <th className="py-2 font-medium">#</th>
-              <th className="py-2 font-medium">Item</th>
-              <th className="py-2 text-right font-medium">Qty</th>
-              <th className="py-2 text-right font-medium">Rate</th>
-              <th className="py-2 text-right font-medium">GST%</th>
-              <th className="py-2 text-right font-medium">Amount</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-stone-100">
-            {items.map((it, idx) => (
-              <tr key={it.id}>
-                <td className="py-2 text-stone-500">{idx + 1}</td>
-                <td className="py-2 font-medium text-stone-900">
-                  {it.product_name}
-                </td>
-                <td className="py-2 text-right text-stone-700">
-                  {Number(it.quantity)} {it.unit}
-                </td>
-                <td className="py-2 text-right text-stone-700">
-                  {inr(it.price)}
-                </td>
-                <td className="py-2 text-right text-stone-700">
-                  {Number(it.gst_rate)}%
-                </td>
-                <td className="py-2 text-right font-medium text-stone-900">
-                  {inr(it.line_total)}
-                </td>
+        <div className="mt-4 overflow-x-auto">
+          <table className="w-full min-w-[560px] text-sm">
+            <thead>
+              <tr className="border-y border-stone-200 text-left text-xs text-stone-500">
+                <th className="py-2 font-medium">#</th>
+                <th className="py-2 font-medium">Item</th>
+                <th className="py-2 text-right font-medium">Qty</th>
+                <th className="py-2 text-right font-medium">Rate</th>
+                <th className="py-2 text-right font-medium">GST%</th>
+                <th className="py-2 text-right font-medium">Amount</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody className="divide-y divide-stone-100">
+              {items.map((it, idx) => (
+                <tr key={it.id}>
+                  <td className="py-2 text-stone-500">{idx + 1}</td>
+                  <td className="py-2 font-medium text-stone-900">
+                    {it.product_name}
+                  </td>
+                  <td className="py-2 text-right text-stone-700">
+                    {Number(it.quantity)} {it.unit}
+                  </td>
+                  <td className="py-2 text-right text-stone-700">
+                    {inr(it.price)}
+                  </td>
+                  <td className="py-2 text-right text-stone-700">
+                    {Number(it.gst_rate)}%
+                  </td>
+                  <td className="py-2 text-right font-medium text-stone-900">
+                    {inr(it.line_total)}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
 
         <div className="mt-4 ml-auto w-full max-w-xs space-y-1 text-sm">
           <div className="flex justify-between text-stone-600">
