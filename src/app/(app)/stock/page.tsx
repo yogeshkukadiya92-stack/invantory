@@ -141,6 +141,28 @@ export default function StockPage() {
   }, [form.product_id, form.location_id, form.type, movements]);
 
   const selectedProduct = products.find((p) => p.product_id === form.product_id);
+  const selectedLocationStock =
+    locStock.find((row) => row.location_id === form.location_id)?.stock ??
+    (locStock.length === 0 ? selectedProduct?.stock ?? 0 : 0);
+
+  async function getFreshLocationStock() {
+    if (!form.product_id || !form.location_id) return 0;
+    const { data } = await supabase
+      .from("location_stock")
+      .select("*")
+      .eq("product_id", form.product_id)
+      .limit(100);
+    const rows = (data ?? []) as LocationStockRow[];
+    const selected = rows.find((row) => row.location_id === form.location_id);
+    if (selected) return Number(selected.stock ?? 0);
+    if (rows.length > 0) return 0;
+    const { data: currentData } = await supabase
+      .from("current_stock")
+      .select("*")
+      .eq("product_id", form.product_id)
+      .limit(1);
+    return Number(((currentData ?? []) as StockRow[])[0]?.stock ?? 0);
+  }
 
   async function handleSubmit() {
     if (busy) return;
@@ -148,19 +170,37 @@ export default function StockPage() {
       setMessage({ kind: "err", text: "Product select karo" });
       return;
     }
-    const qty = parseInt(form.quantity, 10);
-    if (!qty || (form.type !== "adjustment" && qty <= 0)) {
+    const qty = Number(form.quantity);
+    if (
+      !Number.isInteger(qty) ||
+      (form.type === "adjustment" ? qty < 0 : qty <= 0)
+    ) {
       setMessage({ kind: "err", text: "Valid quantity nakho" });
       return;
     }
     setBusy(true);
     setMessage(null);
 
+    let movementQuantity = qty;
+    let reason = form.reason.trim() || null;
+    if (form.type === "adjustment") {
+      const current = await getFreshLocationStock();
+      movementQuantity = qty - current;
+      reason = reason || `Set stock to ${qty}`;
+      if (movementQuantity === 0) {
+        const locName =
+          locations.find((l) => l.id === form.location_id)?.name ?? "location";
+        setBusy(false);
+        setMessage({ kind: "ok", text: `${locName} par stock already ${qty} che` });
+        return;
+      }
+    }
+
     const { data, error } = await supabase.rpc("record_movement", {
       p_product_id: form.product_id,
       p_type: form.type,
-      p_quantity: qty,
-      p_reason: form.reason.trim() || null,
+      p_quantity: movementQuantity,
+      p_reason: reason,
       p_supplier_id: form.type === "in" && form.supplier_id ? form.supplier_id : null,
       p_location_id: form.location_id || null,
       p_batch_no: form.type === "in" && form.batch_no.trim() ? form.batch_no.trim() : null,
@@ -307,7 +347,7 @@ export default function StockPage() {
                           : "border border-stone-300 text-stone-700 hover:bg-stone-50"
                       }`}
                     >
-                      {t}
+                      {t === "in" ? "Add" : t === "out" ? "Remove" : "Set"}
                     </button>
                   ))}
                 </div>
@@ -315,22 +355,23 @@ export default function StockPage() {
 
               <div>
                 <label className={label}>
-                  Quantity
+                  {form.type === "adjustment" ? "Set stock to" : "Quantity"}
                   {form.type === "adjustment" && (
                     <span className="ml-1 font-normal text-stone-400">
-                      (negative = remove, e.g. -5)
+                      (current {selectedLocationStock})
                     </span>
                   )}
                 </label>
                 <input
                   type="number"
                   inputMode="numeric"
+                  min={form.type === "adjustment" ? "0" : "1"}
                   className={input}
                   value={form.quantity}
                   onChange={(e) =>
                     setForm((f) => ({ ...f, quantity: e.target.value }))
                   }
-                  placeholder={form.type === "adjustment" ? "e.g. -5 or 10" : "e.g. 50"}
+                  placeholder={form.type === "adjustment" ? "e.g. 18" : "e.g. 50"}
                 />
               </div>
 
@@ -424,7 +465,7 @@ export default function StockPage() {
                   }
                   placeholder={
                     form.type === "adjustment"
-                      ? "e.g. Damaged, count correction"
+                      ? "e.g. Count correction"
                       : "e.g. New purchase, sale"
                   }
                 />

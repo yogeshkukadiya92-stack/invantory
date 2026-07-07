@@ -32,6 +32,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
     barcode: initialBarcode ?? "",
     category_id: "",
     unit: "pcs",
+    opening_stock: "0",
     purchase_price: "",
     selling_price: "",
     min_stock_level: "0",
@@ -67,6 +68,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
           barcode: data.barcode ?? "",
           category_id: data.category_id ?? "",
           unit: data.unit,
+          opening_stock: "0",
           purchase_price: String(data.purchase_price),
           selling_price: String(data.selling_price),
           min_stock_level: String(data.min_stock_level),
@@ -122,6 +124,16 @@ export function ProductForm({ productId, initialBarcode }: Props) {
       setError("Product name is required");
       return;
     }
+    const unit = form.unit.trim() || "pcs";
+    if (/^-?\d+(\.\d+)?$/.test(unit)) {
+      setError("Unit ma pcs/kg/box lakho. Stock quantity alag field ma nakho.");
+      return;
+    }
+    const openingStock = Number(form.opening_stock);
+    if (!productId && (!Number.isFinite(openingStock) || openingStock < 0)) {
+      setError("Opening stock 0 ke tena thi vadhare hovu joie");
+      return;
+    }
     setSaving(true);
     setError(null);
 
@@ -149,7 +161,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
       sku: form.sku.trim() || null,
       barcode: form.barcode.trim() || null,
       category_id: form.category_id || null,
-      unit: form.unit.trim() || "pcs",
+      unit,
       purchase_price: Number(form.purchase_price) || 0,
       selling_price: Number(form.selling_price) || 0,
       min_stock_level: Number(form.min_stock_level) || 0,
@@ -157,9 +169,9 @@ export function ProductForm({ productId, initialBarcode }: Props) {
       gst_rate: Number(form.gst_rate) || 0,
     };
 
-    const { error } = productId
-      ? await supabase.from("products").update(payload).eq("id", productId)
-      : await supabase.from("products").insert(payload);
+    const { data: savedProduct, error } = productId
+      ? await supabase.from("products").update(payload).eq("id", productId).single()
+      : await supabase.from("products").insert(payload).select("id").single();
 
     if (error) {
       setError(
@@ -169,6 +181,21 @@ export function ProductForm({ productId, initialBarcode }: Props) {
       );
       setSaving(false);
       return;
+    }
+
+    const newProductId = (savedProduct as Product | null)?.id;
+    if (!productId && newProductId && openingStock > 0) {
+      const { error: stockError } = await supabase.from("stock_movements").insert({
+        product_id: newProductId,
+        quantity: openingStock,
+        reason: "Opening stock",
+        type: "in",
+      });
+      if (stockError) {
+        setError("Product save thayu, pan opening stock save nathi thayu: " + stockError.message);
+        setSaving(false);
+        return;
+      }
     }
     router.push("/products");
     router.refresh();
@@ -387,7 +414,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={label}>Unit</label>
+            <label className={label}>Unit label</label>
             <input
               className={input}
               value={form.unit}
@@ -406,6 +433,21 @@ export function ProductForm({ productId, initialBarcode }: Props) {
             />
           </div>
         </div>
+
+        {!productId && (
+          <div>
+            <label className={label}>Opening stock</label>
+            <input
+              type="number"
+              inputMode="numeric"
+              min="0"
+              className={input}
+              value={form.opening_stock}
+              onChange={(e) => set("opening_stock", e.target.value)}
+              placeholder="0"
+            />
+          </div>
+        )}
 
         {error && (
           <p className="rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">

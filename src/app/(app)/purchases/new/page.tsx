@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/mongodb/client";
-import type { StockRow, Supplier } from "@/lib/types";
+import type { Location, StockRow, Supplier } from "@/lib/types";
 
 interface Line {
   product_id: string;
@@ -23,17 +23,30 @@ export default function NewPurchasePage() {
   const [results, setResults] = useState<StockRow[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierId, setSupplierId] = useState("");
+  const [showSupplierForm, setShowSupplierForm] = useState(false);
+  const [newSupplier, setNewSupplier] = useState({ name: "", phone: "" });
+  const [locations, setLocations] = useState<Location[]>([]);
+  const [locationId, setLocationId] = useState("");
+  const [receiveNow, setReceiveNow] = useState(true);
   const [note, setNote] = useState("");
   const [saving, setSaving] = useState(false);
+  const [savingSupplier, setSavingSupplier] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    async function loadSuppliers() {
-      const { data } = await supabase.from("suppliers").select("*").order("name");
+    async function loadInitial() {
+      const [{ data }, { data: locs }] = await Promise.all([
+        supabase.from("suppliers").select("*").order("name"),
+        supabase.from("locations").select("*").order("name"),
+      ]);
       setSuppliers((data ?? []) as Supplier[]);
+      const locList = (locs ?? []) as Location[];
+      setLocations(locList);
+      const def = locList.find((l) => l.is_default) ?? locList[0];
+      if (def) setLocationId(def.id);
     }
-    loadSuppliers();
+    loadInitial();
     searchRef.current?.focus();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -101,6 +114,37 @@ export default function NewPurchasePage() {
     0
   );
 
+  async function addSupplier() {
+    if (savingSupplier) return;
+    const name = newSupplier.name.trim();
+    if (!name) {
+      setError("Supplier name lakho");
+      return;
+    }
+    setSavingSupplier(true);
+    setError(null);
+    const { data, error } = await supabase
+      .from("suppliers")
+      .insert({
+        name,
+        phone: newSupplier.phone.trim() || null,
+      })
+      .select("*")
+      .single();
+    setSavingSupplier(false);
+    if (error) {
+      setError(error.message);
+      return;
+    }
+    const supplier = data as Supplier;
+    setSuppliers((prev) =>
+      [...prev, supplier].sort((a, b) => a.name.localeCompare(b.name))
+    );
+    setSupplierId(supplier.id);
+    setNewSupplier({ name: "", phone: "" });
+    setShowSupplierForm(false);
+  }
+
   async function savePO() {
     if (saving) return;
     if (lines.length === 0) {
@@ -136,7 +180,19 @@ export default function NewPurchasePage() {
       setSaving(false);
       return;
     }
-    router.push(`/purchases/${(data as { po_id: string }).po_id}`);
+    const poId = (data as { po_id: string }).po_id;
+    if (receiveNow) {
+      const { error: receiveError } = await supabase.rpc("receive_purchase_order", {
+        p_po_id: poId,
+        p_location_id: locationId || null,
+      });
+      if (receiveError) {
+        window.alert(
+          `PO save thayu, pan stock entry fail thayu: ${receiveError.message}`
+        );
+      }
+    }
+    router.push(`/purchases/${poId}`);
   }
 
   const input =
@@ -150,29 +206,93 @@ export default function NewPurchasePage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <h1 className="text-xl font-semibold text-stone-900">
-        New purchase order
-      </h1>
+      <h1 className="text-xl font-semibold text-stone-900">New purchase</h1>
 
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
-        <select
-          className={input}
-          value={supplierId}
-          onChange={(e) => setSupplierId(e.target.value)}
-        >
-          <option value="">— Supplier select karo —</option>
-          {suppliers.map((s) => (
-            <option key={s.id} value={s.id}>
-              {s.name}
-            </option>
-          ))}
-        </select>
+        <div className="space-y-2">
+          <div className="flex gap-2">
+            <select
+              className={`${input} min-w-0 flex-1`}
+              value={supplierId}
+              onChange={(e) => setSupplierId(e.target.value)}
+            >
+              <option value="">— Supplier select karo —</option>
+              {suppliers.map((s) => (
+                <option key={s.id} value={s.id}>
+                  {s.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              onClick={() => setShowSupplierForm((v) => !v)}
+              className="shrink-0 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
+            >
+              + Supplier
+            </button>
+          </div>
+          {showSupplierForm && (
+            <div className="grid gap-2 rounded-xl border border-stone-200 bg-white p-3 sm:grid-cols-[1fr_140px_auto]">
+              <input
+                className={input}
+                value={newSupplier.name}
+                onChange={(e) =>
+                  setNewSupplier((s) => ({ ...s, name: e.target.value }))
+                }
+                placeholder="Supplier name"
+              />
+              <input
+                className={input}
+                value={newSupplier.phone}
+                onChange={(e) =>
+                  setNewSupplier((s) => ({ ...s, phone: e.target.value }))
+                }
+                placeholder="Phone"
+              />
+              <button
+                type="button"
+                onClick={addSupplier}
+                disabled={savingSupplier}
+                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
+              >
+                {savingSupplier ? "Saving..." : "Add"}
+              </button>
+            </div>
+          )}
+        </div>
         <input
           className={input}
           value={note}
           onChange={(e) => setNote(e.target.value)}
           placeholder="Note (optional)"
         />
+      </div>
+
+      <div className="mt-3 flex flex-col gap-2 rounded-xl border border-stone-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+        <label className="flex items-center gap-2 text-sm font-medium text-stone-700">
+          <input
+            type="checkbox"
+            checked={receiveNow}
+            onChange={(e) => setReceiveNow(e.target.checked)}
+            className="h-4 w-4 accent-emerald-700"
+          />
+          Purchase save karta stock ma entry karo
+        </label>
+        {receiveNow && locations.length > 1 && (
+          <select
+            className={input}
+            value={locationId}
+            onChange={(e) => setLocationId(e.target.value)}
+            title="Stock receive location"
+          >
+            {locations.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+                {l.is_default ? " (default)" : ""}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div className="relative mt-3">
@@ -291,7 +411,11 @@ export default function NewPurchasePage() {
         disabled={saving || lines.length === 0}
         className="mt-4 w-full rounded-xl bg-emerald-700 py-3.5 text-base font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
       >
-        {saving ? "Saving..." : `📦 Create PO — ${inr(total)}`}
+        {saving
+          ? "Saving..."
+          : receiveNow
+            ? `📦 Save purchase + stock — ${inr(total)}`
+            : `📦 Create PO — ${inr(total)}`}
       </button>
     </div>
   );

@@ -219,7 +219,32 @@ async function normalizeProducts(db: Db) {
         { $or: [{ barcode: null }, { barcode: "" }] },
         { $unset: { barcode: "" } }
       ),
+    db.collection("products").updateMany(
+      {
+        $or: [
+          { unit: { $exists: false } },
+          { unit: null },
+          { unit: "" },
+          { unit: { $regex: /^-?\d+(\.\d+)?$/ } },
+        ],
+      },
+      { $set: { unit: "pcs" } }
+    ),
   ]);
+}
+
+async function normalizeStockMovements(db: Db) {
+  const defaultLocationId = await getDefaultLocationId(db);
+  await db.collection("stock_movements").updateMany(
+    {
+      $or: [
+        { location_id: { $exists: false } },
+        { location_id: null },
+        { location_id: "" },
+      ],
+    },
+    { $set: { location_id: defaultLocationId } }
+  );
 }
 
 export async function prepareDatabase(db?: Db) {
@@ -227,6 +252,7 @@ export async function prepareDatabase(db?: Db) {
   await ensureDefaults(database);
   await ensureDocumentIds(database);
   await normalizeProducts(database);
+  await normalizeStockMovements(database);
   await ensureIndexes(database);
   return database;
 }

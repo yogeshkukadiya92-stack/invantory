@@ -3,7 +3,15 @@
 import { useEffect, useMemo, useState } from "react";
 import * as XLSX from "xlsx";
 import { createClient } from "@/lib/mongodb/client";
-import type { Category, MovementType, StockRow } from "@/lib/types";
+import type {
+  Category,
+  MovementType,
+  PurchaseOrder,
+  PurchaseOrderItem,
+  Sale,
+  SaleItem,
+  StockRow,
+} from "@/lib/types";
 
 interface LedgerMovement {
   id: string;
@@ -237,6 +245,147 @@ export default function ReportsPage() {
     setExporting(null);
   }
 
+  async function exportPurchases() {
+    setExporting("purchases");
+    let query = supabase
+      .from("purchase_orders")
+      .select("*, suppliers(name)")
+      .order("created_at", { ascending: false })
+      .limit(5000);
+    if (fromDate) query = query.gte("created_at", fromDate);
+    if (toDate) query = query.lte("created_at", toDate + "T23:59:59");
+
+    const { data } = await query;
+    type PurchaseExportRow = PurchaseOrder & {
+      suppliers: { name: string } | null;
+    };
+    const rows = ((data ?? []) as PurchaseExportRow[]).map((p) => ({
+      "PO": p.po_no,
+      "Date": new Date(p.created_at).toLocaleString("en-IN"),
+      "Supplier": p.suppliers?.name ?? "",
+      "Total": Number(p.total),
+      "Status": p.status,
+      "Received at": p.received_at
+        ? new Date(p.received_at).toLocaleString("en-IN")
+        : "",
+      "Note": p.note ?? "",
+    }));
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws["!cols"] = [
+      { wch: 16 }, { wch: 20 }, { wch: 24 }, { wch: 11 },
+      { wch: 10 }, { wch: 20 }, { wch: 28 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Purchases");
+    XLSX.writeFile(wb, `purchase-report-${today()}.xlsx`);
+    setExporting(null);
+  }
+
+  async function exportSaleItems() {
+    setExporting("sale-items");
+    let salesQuery = supabase
+      .from("sales")
+      .select("*, customers(name)")
+      .order("created_at", { ascending: false })
+      .limit(5000);
+    if (fromDate) salesQuery = salesQuery.gte("created_at", fromDate);
+    if (toDate) salesQuery = salesQuery.lte("created_at", toDate + "T23:59:59");
+
+    const { data: salesData } = await salesQuery;
+    type SaleWithCustomer = Sale & { customers: { name: string } | null };
+    const sales = (salesData ?? []) as SaleWithCustomer[];
+    const saleIds = sales.map((s) => s.id);
+    const { data: itemsData } =
+      saleIds.length > 0
+        ? await supabase
+            .from("sale_items")
+            .select("*")
+            .in("sale_id", saleIds)
+            .limit(10000)
+        : { data: [] };
+    const saleMap = new Map(sales.map((s) => [s.id, s]));
+    type SaleItemRow = SaleItem & { cost?: number };
+    const rows = ((itemsData ?? []) as SaleItemRow[]).map((it) => {
+      const sale = saleMap.get(it.sale_id);
+      const cost = Number(it.cost ?? 0);
+      const quantity = Number(it.quantity);
+      return {
+        "Date": sale ? new Date(sale.created_at).toLocaleString("en-IN") : "",
+        "Invoice": sale?.invoice_no ?? "",
+        "Customer": sale?.customers?.name ?? "Walk-in",
+        "Item": it.product_name,
+        "Qty": quantity,
+        "Unit": it.unit,
+        "Rate": Number(it.price),
+        "Line total": Number(it.line_total),
+        "GST %": Number(it.gst_rate),
+        "Cost": cost,
+        "Profit": Number(it.line_total) - quantity * cost,
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws["!cols"] = [
+      { wch: 20 }, { wch: 16 }, { wch: 22 }, { wch: 28 }, { wch: 8 },
+      { wch: 8 }, { wch: 10 }, { wch: 12 }, { wch: 8 }, { wch: 10 }, { wch: 10 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Sale items");
+    XLSX.writeFile(wb, `sale-items-${today()}.xlsx`);
+    setExporting(null);
+  }
+
+  async function exportPurchaseItems() {
+    setExporting("purchase-items");
+    let purchasesQuery = supabase
+      .from("purchase_orders")
+      .select("*, suppliers(name)")
+      .order("created_at", { ascending: false })
+      .limit(5000);
+    if (fromDate) purchasesQuery = purchasesQuery.gte("created_at", fromDate);
+    if (toDate) purchasesQuery = purchasesQuery.lte("created_at", toDate + "T23:59:59");
+
+    const { data: purchasesData } = await purchasesQuery;
+    type PurchaseWithSupplier = PurchaseOrder & {
+      suppliers: { name: string } | null;
+    };
+    const purchases = (purchasesData ?? []) as PurchaseWithSupplier[];
+    const poIds = purchases.map((p) => p.id);
+    const { data: itemsData } =
+      poIds.length > 0
+        ? await supabase
+            .from("purchase_order_items")
+            .select("*")
+            .in("po_id", poIds)
+            .limit(10000)
+        : { data: [] };
+    const purchaseMap = new Map(purchases.map((p) => [p.id, p]));
+    const rows = ((itemsData ?? []) as PurchaseOrderItem[]).map((it) => {
+      const purchase = purchaseMap.get(it.po_id);
+      return {
+        "Date": purchase
+          ? new Date(purchase.created_at).toLocaleString("en-IN")
+          : "",
+        "PO": purchase?.po_no ?? "",
+        "Supplier": purchase?.suppliers?.name ?? "",
+        "Status": purchase?.status ?? "",
+        "Item": it.product_name,
+        "Qty": Number(it.quantity),
+        "Unit": it.unit,
+        "Cost": Number(it.cost),
+        "Line total": Number(it.line_total),
+      };
+    });
+    const ws = XLSX.utils.json_to_sheet(rows);
+    ws["!cols"] = [
+      { wch: 20 }, { wch: 16 }, { wch: 24 }, { wch: 10 }, { wch: 28 },
+      { wch: 8 }, { wch: 8 }, { wch: 10 }, { wch: 12 },
+    ];
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Purchase items");
+    XLSX.writeFile(wb, `purchase-items-${today()}.xlsx`);
+    setExporting(null);
+  }
+
   function today() {
     return new Date().toISOString().slice(0, 10);
   }
@@ -250,7 +399,7 @@ export default function ReportsPage() {
       <h1 className="text-xl font-semibold text-stone-900">Reports</h1>
 
       {/* QUICK EXPORTS */}
-      <div className="mt-4 grid gap-3 sm:grid-cols-3">
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
         <div className="rounded-2xl border border-stone-200 bg-white p-5">
           <h2 className="text-sm font-semibold text-stone-900">
             Current stock report
@@ -296,6 +445,54 @@ export default function ReportsPage() {
             className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
           >
             {exporting === "sales" ? "Exporting..." : "⬇ Download Excel"}
+          </button>
+        </div>
+
+        <div className="rounded-2xl border border-stone-200 bg-white p-5">
+          <h2 className="text-sm font-semibold text-stone-900">
+            Purchase report
+          </h2>
+          <p className="mt-1 text-xs text-stone-500">
+            Supplier wise PO total, status ane received date
+          </p>
+          <button
+            onClick={exportPurchases}
+            disabled={exporting === "purchases"}
+            className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
+          >
+            {exporting === "purchases" ? "Exporting..." : "⬇ Download Excel"}
+          </button>
+        </div>
+
+        <div className="rounded-2xl border border-stone-200 bg-white p-5">
+          <h2 className="text-sm font-semibold text-stone-900">
+            Sales item-wise
+          </h2>
+          <p className="mt-1 text-xs text-stone-500">
+            Invoice item detail — qty, rate, GST ane profit
+          </p>
+          <button
+            onClick={exportSaleItems}
+            disabled={exporting === "sale-items"}
+            className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
+          >
+            {exporting === "sale-items" ? "Exporting..." : "⬇ Download Excel"}
+          </button>
+        </div>
+
+        <div className="rounded-2xl border border-stone-200 bg-white p-5">
+          <h2 className="text-sm font-semibold text-stone-900">
+            Purchase item-wise
+          </h2>
+          <p className="mt-1 text-xs text-stone-500">
+            PO item detail — supplier, qty, cost ane total
+          </p>
+          <button
+            onClick={exportPurchaseItems}
+            disabled={exporting === "purchase-items"}
+            className="mt-3 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
+          >
+            {exporting === "purchase-items" ? "Exporting..." : "⬇ Download Excel"}
           </button>
         </div>
       </div>
