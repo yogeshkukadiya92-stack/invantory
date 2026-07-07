@@ -20,6 +20,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
   const [loading, setLoading] = useState(!!productId);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [missingProduct, setMissingProduct] = useState(false);
 
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -47,26 +48,32 @@ export function ProductForm({ productId, initialBarcode }: Props) {
       setCategories((cats ?? []) as Category[]);
 
       if (productId) {
-        const { data } = await supabase
+        const { data, error: productError } = await supabase
           .from("products")
           .select("*")
           .eq("id", productId)
           .single();
-        if (data) {
-          setForm({
-            name: data.name,
-            sku: data.sku ?? "",
-            barcode: data.barcode ?? "",
-            category_id: data.category_id ?? "",
-            unit: data.unit,
-            purchase_price: String(data.purchase_price),
-            selling_price: String(data.selling_price),
-            min_stock_level: String(data.min_stock_level),
-            hsn_code: data.hsn_code ?? "",
-            gst_rate: String(data.gst_rate ?? 0),
-          });
-          setImageUrl(data.image_url);
+        if (productError || !data) {
+          setMissingProduct(true);
+          setError(
+            "Product not found. Products page refresh karo ane product fari open karo."
+          );
+          setLoading(false);
+          return;
         }
+        setForm({
+          name: data.name,
+          sku: data.sku ?? "",
+          barcode: data.barcode ?? "",
+          category_id: data.category_id ?? "",
+          unit: data.unit,
+          purchase_price: String(data.purchase_price),
+          selling_price: String(data.selling_price),
+          min_stock_level: String(data.min_stock_level),
+          hsn_code: data.hsn_code ?? "",
+          gst_rate: String(data.gst_rate ?? 0),
+        });
+        setImageUrl(data.image_url);
         setLoading(false);
       }
     }
@@ -188,6 +195,24 @@ export function ProductForm({ productId, initialBarcode }: Props) {
 
   if (loading)
     return <p className="py-8 text-center text-sm text-stone-500">Loading...</p>;
+
+  if (missingProduct) {
+    return (
+      <div className="mx-auto max-w-lg rounded-2xl border border-red-100 bg-white p-5">
+        <h1 className="text-lg font-semibold text-stone-900">
+          Product open nathi thai rahyu
+        </h1>
+        {error && <p className="mt-2 text-sm text-red-700">{error}</p>}
+        <button
+          type="button"
+          onClick={() => router.push("/products")}
+          className="mt-4 rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
+        >
+          Back to products
+        </button>
+      </div>
+    );
+  }
 
   const input =
     "w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600";

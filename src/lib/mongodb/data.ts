@@ -1,5 +1,5 @@
 import { randomUUID } from "crypto";
-import type { Db } from "mongodb";
+import { ObjectId, type Db } from "mongodb";
 import { getDb } from "./connection";
 import { ensureDefaults, type MongoUser } from "./auth";
 
@@ -57,7 +57,25 @@ const COLLECTIONS = new Set([
   "sale_returns",
   "sales",
   "stock_movements",
+  "suppliers",
 ]);
+
+const ID_COLLECTIONS = [
+  "batches",
+  "categories",
+  "customers",
+  "locations",
+  "products",
+  "profiles",
+  "purchase_order_items",
+  "purchase_orders",
+  "sale_items",
+  "sale_return_items",
+  "sale_returns",
+  "sales",
+  "stock_movements",
+  "suppliers",
+];
 
 function nowIso() {
   return new Date().toISOString();
@@ -78,9 +96,46 @@ function cloneRow<T>(row: T): T {
 
 function publicRow(row: DocumentRow) {
   const copy = { ...row };
+  if ((copy.id === null || copy.id === undefined || copy.id === "") && copy._id) {
+    copy.id = String(copy._id);
+  }
   delete copy._id;
   delete copy.password_hash;
   return copy;
+}
+
+function rowPublicId(row: DocumentRow) {
+  const value = row.id ?? row.product_id ?? row._id;
+  return value === null || value === undefined ? "" : String(value);
+}
+
+function repairedDocumentId(collection: string, row: DocumentRow) {
+  if (collection === "products" && row.product_id) return String(row.product_id);
+  return String(row._id);
+}
+
+function objectIdFromString(value: string) {
+  return ObjectId.isValid(value) ? new ObjectId(value) : null;
+}
+
+function idFilter(ids: string[]) {
+  const clean = ids.map(String).map((id) => id.trim()).filter(Boolean);
+  const objectIds = clean
+    .map(objectIdFromString)
+    .filter((id): id is ObjectId => id !== null);
+  const clauses: DocumentRow[] = [{ id: { $in: clean } }];
+  if (objectIds.length > 0) clauses.push({ _id: { $in: objectIds } });
+  return clauses.length === 1 ? clauses[0] : { $or: clauses };
+}
+
+function singleIdFilter(id: string) {
+  return idFilter([id]);
+}
+
+function foreignIdFilter(field: string, id: string) {
+  const objectId = objectIdFromString(id);
+  if (!objectId) return { [field]: id };
+  return { $or: [{ [field]: id }, { [field]: objectId }] };
 }
 
 function signedMovement(row: DocumentRow) {
@@ -107,6 +162,7 @@ async function ensureIndexes(db: Db) {
     ),
     db.collection("customers").createIndex({ name: 1 }),
     db.collection("locations").createIndex({ name: 1 }, { unique: true }),
+    db.collection("suppliers").createIndex({ name: 1 }),
     db.collection("batches").createIndex(
       { product_id: 1, batch_no: 1 },
       { unique: true }
@@ -123,9 +179,54 @@ async function ensureIndexes(db: Db) {
   ]);
 }
 
+async function ensureDocumentIds(db: Db) {
+  await Promise.all(
+    ID_COLLECTIONS.map(async (name) => {
+      const rows = await db
+        .collection(name)
+        .find(
+          {
+            $or: [
+              { id: { $exists: false } },
+              { id: null },
+              { id: "" },
+            ],
+          },
+          { projection: { _id: 1, product_id: 1 } }
+        )
+        .toArray();
+      if (rows.length === 0) return;
+      await Promise.all(
+        rows.map((row) =>
+          db.collection(name).updateOne(
+            { _id: row._id },
+            { $set: { id: repairedDocumentId(name, row) } }
+          )
+        )
+      );
+    })
+  );
+}
+
+async function normalizeProducts(db: Db) {
+  await Promise.all([
+    db
+      .collection("products")
+      .updateMany({ $or: [{ sku: null }, { sku: "" }] }, { $unset: { sku: "" } }),
+    db
+      .collection("products")
+      .updateMany(
+        { $or: [{ barcode: null }, { barcode: "" }] },
+        { $unset: { barcode: "" } }
+      ),
+  ]);
+}
+
 export async function prepareDatabase(db?: Db) {
   const database = db ?? (await getDb());
   await ensureDefaults(database);
+  await ensureDocumentIds(database);
+  await normalizeProducts(database);
   await ensureIndexes(database);
   return database;
 }
@@ -164,10 +265,11 @@ async function currentStockRows(db: Db) {
     stockByProduct.set(key, (stockByProduct.get(key) ?? 0) + signedMovement(movement));
   }
   return products.map((product) => {
-    const stock = stockByProduct.get(String(product.id)) ?? 0;
+    const productId = rowPublicId(product);
+    const stock = stockByProduct.get(productId) ?? 0;
     return publicRow({
       ...product,
-      product_id: product.id,
+      product_id: productId,
       stock,
       stock_value: round2(stock * toNumber(product.purchase_price)),
     });
@@ -180,7 +282,7 @@ async function locationStockRows(db: Db) {
     db.collection("products").find({}).toArray(),
     db.collection("locations").find({}).toArray(),
   ]);
-  const productMap = new Map(products.map((p) => [String(p.id), p]));
+  const productMap = new Map(products.map((p) => [rowPublicId(p), p]));
   const locationMap = new Map(locations.map((l) => [String(l.id), l]));
   const totals = new Map<string, DocumentRow>();
   for (const movement of movements) {
@@ -212,7 +314,7 @@ async function batchStockRows(db: Db) {
     db.collection("locations").find({}).toArray(),
     db.collection("batches").find({}).toArray(),
   ]);
-  const productMap = new Map(products.map((p) => [String(p.id), p]));
+  const productMap = new Map(products.map((p) => [rowPublicId(p), p]));
   const locationMap = new Map(locations.map((l) => [String(l.id), l]));
   const batchMap = new Map(batches.map((b) => [String(b.id), b]));
   const totals = new Map<string, DocumentRow>();
@@ -230,7 +332,7 @@ async function batchStockRows(db: Db) {
         expiry_date: batch.expiry_date ?? null,
         location_id: location.id,
         location_name: location.name,
-        product_id: product.id,
+        product_id: rowPublicId(product),
         product_name: product.name,
         stock: 0,
         unit: product.unit,
@@ -286,12 +388,19 @@ async function rowsForTable(db: Db, table: string) {
 
 function matchesFilter(row: DocumentRow, filter: QueryFilter) {
   const value = row[filter.column];
-  if (filter.op === "eq") return value === filter.value;
+  if (filter.op === "eq") {
+    if (filter.value === null) return value === null || value === undefined;
+    if (value === null || value === undefined) return false;
+    return String(value) === String(filter.value);
+  }
   if (filter.op === "gte") return String(value ?? "") >= String(filter.value ?? "");
   if (filter.op === "lte") return String(value ?? "") <= String(filter.value ?? "");
   if (filter.op === "gt") return toNumber(value) > toNumber(filter.value);
   if (filter.op === "in") {
-    return Array.isArray(filter.value) && filter.value.includes(value);
+    return (
+      Array.isArray(filter.value) &&
+      filter.value.some((candidate) => String(candidate) === String(value))
+    );
   }
   if (filter.op === "not" && filter.modifier === "is" && filter.value === null) {
     return value !== null && value !== undefined;
@@ -372,12 +481,12 @@ async function decorateRows(db: Db, table: string, columns: string | undefined, 
     const locationIds = [...new Set(out.map((row) => row.location_id).filter(Boolean))];
     const batchIds = [...new Set(out.map((row) => row.batch_id).filter(Boolean))];
     const [products, profiles, locations, batches] = await Promise.all([
-      db.collection("products").find({ id: { $in: productIds } }).toArray(),
+      db.collection("products").find(idFilter(productIds.map(String))).toArray(),
       db.collection("profiles").find({ id: { $in: profileIds } }).toArray(),
       db.collection("locations").find({ id: { $in: locationIds } }).toArray(),
       db.collection("batches").find({ id: { $in: batchIds } }).toArray(),
     ]);
-    const productMap = new Map(products.map((row) => [String(row.id), publicRow(row)]));
+    const productMap = new Map(products.map((row) => [rowPublicId(row), publicRow(row)]));
     const profileMap = new Map(profiles.map((row) => [String(row.id), publicRow(row)]));
     const locationMap = new Map(locations.map((row) => [String(row.id), publicRow(row)]));
     const batchMap = new Map(batches.map((row) => [String(row.id), publicRow(row)]));
@@ -413,6 +522,8 @@ function makeInsertRows(table: string, values: unknown, user: MongoUser | null) 
     }
     if (!row.created_at) row.created_at = created;
     if (table === "products") {
+      if (row.sku === null || row.sku === "") delete row.sku;
+      if (row.barcode === null || row.barcode === "") delete row.barcode;
       row.is_active = row.is_active ?? true;
       row.created_by = row.created_by ?? user?.id ?? null;
       row.updated_at = row.updated_at ?? created;
@@ -441,11 +552,32 @@ async function insertRows(db: Db, query: QueryRequest, user: MongoUser | null) {
 async function updateRows(db: Db, query: QueryRequest) {
   const rows = applyFilters(await rowsForTable(db, query.table), query);
   const values = { ...(query.values as DocumentRow) };
-  if (query.table === "products") values.updated_at = values.updated_at ?? nowIso();
+  const unset: DocumentRow = {};
+  if (query.table === "products") {
+    values.updated_at = values.updated_at ?? nowIso();
+    if (values.sku === null || values.sku === "") {
+      delete values.sku;
+      unset.sku = "";
+    }
+    if (values.barcode === null || values.barcode === "") {
+      delete values.barcode;
+      unset.barcode = "";
+    }
+  }
   const ids = rows.map((row) => row.id).filter(Boolean);
   if (ids.length === 0) return [];
-  await db.collection(query.table).updateMany({ id: { $in: ids } }, { $set: values });
-  return rows.map((row) => publicRow({ ...row, ...values }));
+  const update: DocumentRow = {};
+  if (Object.keys(values).length > 0) update.$set = values;
+  if (Object.keys(unset).length > 0) update.$unset = unset;
+  if (Object.keys(update).length === 0) return rows.map(publicRow);
+  await db.collection(query.table).updateMany(idFilter(ids.map(String)), update);
+  return rows.map((row) =>
+    publicRow({
+      ...row,
+      ...values,
+      ...Object.fromEntries(Object.keys(unset).map((key) => [key, null])),
+    })
+  );
 }
 
 async function deleteRows(db: Db, query: QueryRequest) {
@@ -463,7 +595,7 @@ async function deleteRows(db: Db, query: QueryRequest) {
     await db.collection("allowed_emails").deleteMany({ email: { $in: emails } });
     return rows.map(publicRow);
   }
-  if (ids.length > 0) await db.collection(query.table).deleteMany({ id: { $in: ids } });
+  if (ids.length > 0) await db.collection(query.table).deleteMany(idFilter(ids.map(String)));
   return rows.map(publicRow);
 }
 
@@ -506,7 +638,10 @@ export async function executeMongoQuery<T = unknown>(
 }
 
 async function getLocationStock(db: Db, productId: string, locationId: string, batchId?: string | null) {
-  const filter: DocumentRow = { product_id: productId, location_id: locationId };
+  const filter: DocumentRow = {
+    ...foreignIdFilter("product_id", productId),
+    location_id: locationId,
+  };
   if (batchId) filter.batch_id = batchId;
   const movements = await db.collection("stock_movements").find(filter).toArray();
   return movements.reduce((sum, movement) => sum + signedMovement(movement), 0);
@@ -525,7 +660,7 @@ async function resolveBatch(
   const normalized = batchNo.trim();
   const existing = await db.collection("batches").findOne({
     batch_no: normalized,
-    product_id: productId,
+    ...foreignIdFilter("product_id", productId),
   });
   if (existing) {
     if (expiryDate) {
@@ -596,7 +731,7 @@ async function recordMovement(db: Db, args: DocumentRow, user: MongoUser) {
   }
   if (type !== "adjustment" && quantity <= 0) throw new Error("Quantity 0 thi vadhare hovi joie");
   if (type === "adjustment" && quantity === 0) throw new Error("Adjustment 0 na hoi shake");
-  const product = await db.collection("products").findOne({ id: productId });
+  const product = await db.collection("products").findOne(singleIdFilter(productId));
   if (!product) throw new Error("Product not found");
   const locationId = args.p_location_id ? String(args.p_location_id) : await getDefaultLocationId(db);
   const batchId = await resolveBatch(
@@ -691,9 +826,9 @@ async function createSale(db: Db, args: DocumentRow, user: MongoUser) {
   const locationId = args.p_location_id ? String(args.p_location_id) : await getDefaultLocationId(db);
   const products = await db
     .collection("products")
-    .find({ id: { $in: items.map((item) => item.product_id) } })
+    .find(idFilter(items.map((item) => String(item.product_id ?? ""))))
     .toArray();
-  const productMap = new Map(products.map((product) => [String(product.id), product]));
+  const productMap = new Map(products.map((product) => [rowPublicId(product), product]));
 
   for (const item of items) {
     const product = productMap.get(String(item.product_id));
@@ -748,6 +883,7 @@ async function createSale(db: Db, args: DocumentRow, user: MongoUser) {
     const quantity = toNumber(item.quantity);
     const price = toNumber(item.price);
     const saleItemId = randomUUID();
+    const productId = rowPublicId(product);
     saleItems.push({
       cost: toNumber(product.purchase_price),
       gst_rate: toNumber(product.gst_rate),
@@ -755,7 +891,7 @@ async function createSale(db: Db, args: DocumentRow, user: MongoUser) {
       id: saleItemId,
       line_total: round2(quantity * price),
       price,
-      product_id: product.id,
+      product_id: productId,
       product_name: product.name,
       quantity,
       sale_id: saleId,
@@ -766,7 +902,7 @@ async function createSale(db: Db, args: DocumentRow, user: MongoUser) {
     const batchRows = (await batchStockRows(db))
       .filter(
         (row) =>
-          row.product_id === product.id &&
+          row.product_id === productId &&
           row.location_id === locationId &&
           toNumber(row.stock) > 0
       )
@@ -780,7 +916,7 @@ async function createSale(db: Db, args: DocumentRow, user: MongoUser) {
         created_by: user.id,
         id: randomUUID(),
         location_id: locationId,
-        product_id: product.id,
+        product_id: productId,
         quantity: take,
         reason: `Sale ${invoiceNo}`,
         sale_id: saleId,
@@ -794,7 +930,7 @@ async function createSale(db: Db, args: DocumentRow, user: MongoUser) {
         created_by: user.id,
         id: randomUUID(),
         location_id: locationId,
-        product_id: product.id,
+        product_id: productId,
         quantity: remaining,
         reason: `Sale ${invoiceNo}`,
         sale_id: saleId,
@@ -812,9 +948,9 @@ async function createPurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
   if (items.length === 0) throw new Error("PO ma ochha ma ochhi 1 item joie");
   const products = await db
     .collection("products")
-    .find({ id: { $in: items.map((item) => item.product_id) } })
+    .find(idFilter(items.map((item) => String(item.product_id ?? ""))))
     .toArray();
-  const productMap = new Map(products.map((product) => [String(product.id), product]));
+  const productMap = new Map(products.map((product) => [rowPublicId(product), product]));
   const poId = randomUUID();
   const poNo = await nextCode(db, "purchase_order", "PO");
   const created_at = nowIso();
@@ -833,7 +969,7 @@ async function createPurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
       id: randomUUID(),
       line_total: line,
       po_id: poId,
-      product_id: product.id,
+      product_id: rowPublicId(product),
       product_name: product.name,
       quantity,
       unit: product.unit,
