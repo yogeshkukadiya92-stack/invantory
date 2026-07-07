@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { createClient } from "@/lib/mongodb/client";
 import type { Customer } from "@/lib/types";
 
 interface CustomerRow extends Customer {

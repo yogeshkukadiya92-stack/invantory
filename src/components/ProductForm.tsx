@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import JsBarcode from "jsbarcode";
-import { createClient } from "@/lib/supabase/client";
+import { createClient } from "@/lib/mongodb/client";
 import type { Category, Product } from "@/lib/types";
 
 interface Props {
@@ -51,7 +51,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
           .from("products")
           .select("*")
           .eq("id", productId)
-          .single<Product>();
+          .single();
         if (data) {
           setForm({
             name: data.name,

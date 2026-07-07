@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { createClient } from "@/lib/mongodb/client";
 import type { StockRow, Supplier } from "@/lib/types";
 
 interface Line {

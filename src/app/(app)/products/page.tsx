@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
+import { createClient } from "@/lib/mongodb/client";
 import type { Category, StockRow } from "@/lib/types";
 
 const PAGE_SIZE = 50;

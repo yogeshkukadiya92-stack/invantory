@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import * as XLSX from "xlsx";
-import { createClient } from "@/lib/supabase/client";
+import { createClient } from "@/lib/mongodb/client";
 import type { Category } from "@/lib/types";
 
 interface ImportRow {
@@ -124,14 +124,18 @@ export default function ImportProductsPage() {
         .from("products")
         .select("barcode")
         .in("barcode", barcodes.slice(i, i + 200));
-      (data ?? []).forEach((p) => p.barcode && existingBarcodes.add(p.barcode));
+      ((data ?? []) as { barcode: string | null }[]).forEach(
+        (p) => p.barcode && existingBarcodes.add(p.barcode)
+      );
     }
     for (let i = 0; i < skus.length; i += 200) {
       const { data } = await supabase
         .from("products")
         .select("sku")
         .in("sku", skus.slice(i, i + 200));
-      (data ?? []).forEach((p) => p.sku && existingSkus.add(p.sku));
+      ((data ?? []) as { sku: string | null }[]).forEach(
+        (p) => p.sku && existingSkus.add(p.sku)
+      );
     }
 
     for (const row of parsed) {
@@ -220,7 +224,12 @@ export default function ImportProductsPage() {
       }
 
       // Opening stock movements
-      const movements = (inserted ?? []).flatMap((p) => {
+      const movements = ((inserted ?? []) as {
+        barcode: string | null;
+        id: string;
+        name: string;
+        sku: string | null;
+      }[]).flatMap((p) => {
         const src = chunk.find(
           (r) =>
             (r.barcode && r.barcode === p.barcode) ||

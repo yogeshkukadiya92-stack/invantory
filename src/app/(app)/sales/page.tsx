@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { createClient } from "@/lib/supabase/client";
+import { createClient } from "@/lib/mongodb/client";
 import type { Sale, SaleStatus } from "@/lib/types";
 
 const PAGE_SIZE = 50;
@@ -52,10 +52,16 @@ export default function SalesPage() {
       setRows((data ?? []) as SaleRow[]);
       setTotal(count ?? 0);
       setTodayTotal(
-        (todayRows ?? []).reduce((s, r) => s + Number(r.grand_total), 0)
+        ((todayRows ?? []) as { grand_total: number }[]).reduce(
+          (s, r) => s + Number(r.grand_total),
+          0
+        )
       );
       setMonthTotal(
-        (monthRows ?? []).reduce((s, r) => s + Number(r.grand_total), 0)
+        ((monthRows ?? []) as { grand_total: number }[]).reduce(
+          (s, r) => s + Number(r.grand_total),
+          0
+        )
       );
       setLoading(false);
     }

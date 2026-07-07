@@ -2,12 +2,12 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { createClient } from "@/lib/supabase/client";
+import { createClient } from "@/lib/mongodb/client";
 
 export function LoginForm({
-  isSupabaseConfigured,
+  isBackendConfigured,
 }: {
-  isSupabaseConfigured: boolean;
+  isBackendConfigured: boolean;
 }) {
   const router = useRouter();
 
@@ -30,7 +30,7 @@ export function LoginForm({
       supabase = createClient();
     } catch {
       setError(
-        "Supabase is not configured. Add the required environment variables before signing in."
+        "MongoDB is not configured. Add the required environment variables before signing in."
       );
       setLoading(false);
       return;
@@ -55,17 +55,15 @@ export function LoginForm({
         options: { data: { full_name: fullName } },
       });
       if (error) {
-        // Invite trigger no exception Supabase generic message tarike aave che
-        const friendly =
-          error.message.includes("Database error saving new user") ||
-          error.message.includes("signup_not_invited")
+      const friendly =
+        error.message.includes("Database error saving new user") ||
+        error.message.includes("signup_not_invited")
             ? "Aa email invited nathi. Admin ne Settings -> Invited emails ma add karva kaho."
             : error.message;
         setError(friendly);
         setLoading(false);
         return;
       }
-      // Email confirmation ON hoy to session nahi male
       if (!data.session) {
         setNotice("Account created. Check your email to confirm, then sign in.");
         setMode("signin");
@@ -95,11 +93,10 @@ export function LoginForm({
         </div>
 
         <div className="rounded-2xl bg-white p-6 shadow-sm border border-stone-200">
-          {!isSupabaseConfigured && (
+          {!isBackendConfigured && (
             <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
-              Supabase is not configured on this deployment. Add
-              NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY, then
-              redeploy.
+              MongoDB is not configured on this deployment. Add MONGODB_URI
+              and SESSION_SECRET, then redeploy.
             </div>
           )}
 

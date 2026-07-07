@@ -1,13 +1,15 @@
-import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { NextResponse, type NextRequest } from "next/server";
 
 export async function proxy(request: NextRequest) {
-  let response = NextResponse.next({ request });
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  const response = NextResponse.next({ request });
+  const isConfigured = Boolean(process.env.MONGODB_URI && process.env.SESSION_SECRET);
   const isLoginPage = request.nextUrl.pathname.startsWith("/login");
+  const isApiRoute = request.nextUrl.pathname.startsWith("/api/");
+  const hasSession = Boolean(request.cookies.get("inventory_session")?.value);
 
-  if (!url || !anonKey) {
+  if (isApiRoute) return response;
+
+  if (!isConfigured) {
     if (!isLoginPage) {
       const url = request.nextUrl.clone();
       url.pathname = "/login";
@@ -17,43 +19,15 @@ export async function proxy(request: NextRequest) {
     return response;
   }
 
-  const supabase = createServerClient(
-    url,
-    anonKey,
-    {
-      cookies: {
-        getAll() {
-          return request.cookies.getAll();
-        },
-        setAll(
-          cookiesToSet: { name: string; value: string; options: CookieOptions }[]
-        ) {
-          cookiesToSet.forEach(({ name, value }) =>
-            request.cookies.set(name, value)
-          );
-          response = NextResponse.next({ request });
-          cookiesToSet.forEach(({ name, value, options }) =>
-            response.cookies.set(name, value, options)
-          );
-        },
-      },
-    }
-  );
-
-  // Session refresh (aa line kadhi nakhsho to auth tuti jashe)
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
   // Login nathi karyu ane protected page par che → /login par mokli do
-  if (!user && !isLoginPage) {
+  if (!hasSession && !isLoginPage) {
     const url = request.nextUrl.clone();
     url.pathname = "/login";
     return NextResponse.redirect(url);
   }
 
   // Login thai gayu che ane /login par che → dashboard par mokli do
-  if (user && isLoginPage) {
+  if (hasSession && isLoginPage) {
     const url = request.nextUrl.clone();
     url.pathname = "/dashboard";
     return NextResponse.redirect(url);

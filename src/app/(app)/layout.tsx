@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
-import { createClient, getSupabaseConfig } from "@/lib/supabase/server";
+import { createClient, getMongoConfig } from "@/lib/mongodb/server";
 import { SignOutButton } from "@/components/SignOutButton";
 import type { Profile } from "@/lib/types";
 
@@ -22,7 +22,7 @@ export default async function AppLayout({
 }: {
   children: React.ReactNode;
 }) {
-  if (!getSupabaseConfig()) {
+  if (!getMongoConfig()) {
     redirect("/login?setup=missing");
   }
 
@@ -37,7 +37,7 @@ export default async function AppLayout({
     .from("profiles")
     .select("*")
     .eq("id", user.id)
-    .single<Profile>();
+    .single();
 
   return (
     <div className="min-h-dvh bg-stone-100">

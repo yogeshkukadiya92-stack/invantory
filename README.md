@@ -1,90 +1,49 @@
-# Inventory App — Phase 1 Setup
+# Inventory App
 
-## Step 1: Project banavo
+Production inventory, billing, stock, purchase order, returns, barcode, and
+reporting app built with Next.js and MongoDB.
 
-```bash
-npx create-next-app@latest inventory-app --typescript --tailwind --app --src-dir --import-alias "@/*"
-cd inventory-app
-npm install @supabase/supabase-js @supabase/ssr @zxing/browser jsbarcode xlsx
-```
-
-## Step 2: Aa zip ni files copy karo
-
-Zip ma je structure che e j structure ma files paste karo:
-
-```
-inventory-app/
-├── .env.local            ← .env.local.example ma thi banavo
-└── src/
-    ├── middleware.ts
-    ├── lib/
-    │   ├── types.ts
-    │   └── supabase/
-    │       ├── client.ts
-    │       └── server.ts
-    ├── components/
-    │   ├── SignOutButton.tsx
-    │   └── ProductForm.tsx
-    └── app/
-        ├── page.tsx              ← existing file REPLACE karo
-        ├── login/
-        │   └── page.tsx
-        └── (app)/
-            ├── layout.tsx
-            ├── dashboard/page.tsx
-            ├── products/
-            │   ├── page.tsx          ← list + search + filters
-            │   ├── new/page.tsx      ← add product (barcode prefill)
-            │   ├── [id]/page.tsx     ← edit product
-            │   └── labels/page.tsx   ← barcode label printing
-            ├── scan/page.tsx         ← USB scanner + camera scan
-            ├── stock/page.tsx        ← manual entry + history
-            ├── reports/page.tsx      ← ledger + Excel exports
-            └── settings/page.tsx     ← categories + suppliers
-```
-
-**Important:** `[id]` folder na name ma square brackets [] sathe j
-rakhvu — e Next.js no dynamic route che.
-
-**Note:** `(app)` folder na name ma kauns () સાથે જ રાખવું — e Next.js nu route group che, URL ma nathi aavtu.
-
-## Step 3: Environment variables
-
-`.env.local.example` ne `.env.local` name aapo ane Supabase dashboard
-(Settings → API) ma thi values bharo:
-
-```
-NEXT_PUBLIC_SUPABASE_URL=https://xxxx.supabase.co
-NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGci...
-```
-
-## Step 4: Run karo
+## Setup
 
 ```bash
+npm install
+cp .env.local.example .env.local
 npm run dev
 ```
 
-http://localhost:3000 kholo → login page dekhashe →
-"Create account" thi signup karo → pachi Supabase SQL Editor ma:
+Open `http://localhost:3000`.
 
-```sql
-update public.profiles set role = 'admin' where id = '<TAMARU_USER_UUID>';
+## Required Environment Variables
+
+```env
+MONGODB_URI=mongodb+srv://user:password@cluster.example.mongodb.net/inventory?retryWrites=true&w=majority
+MONGODB_DB=inventory
+SESSION_SECRET=replace-with-a-long-random-secret
 ```
 
-(UUID: Supabase → Authentication → Users ma malshe)
+`MONGODB_URI` and `SESSION_SECRET` are required. `MONGODB_DB` defaults to
+`inventory` when omitted.
 
-## Camera scan note
+## First User
 
-Browser camera fakt **HTTPS** (athva localhost) par j chale che.
-- Local testing: http://localhost:3000 par camera chalse ✓
-- Phone thi test karva mate: Railway par deploy karo (HTTPS auto male)
-  athva `ngrok` / `cloudflared tunnel` vaparo.
+Create the first account from the login page. The first registered user becomes
+`admin` automatically. After that, new signups must be invited from Settings.
 
-USB barcode scanner ne koi restriction nathi — e keyboard ni jem j
-kaam kare che, koi pan device par chalse.
+## Deployment
 
-## Railway deploy (pachi thi)
+For Railway, Vercel, Render, or another Node.js host:
 
-Railway par deploy karti vakhte aa 2 environment variables
-Railway na Variables tab ma pan add karvana rahese.
-# invantory
+```bash
+npm install
+npm run build
+npm run start
+```
+
+Add the same environment variables in the platform dashboard before deploying.
+
+## Notes
+
+- Product images are stored in MongoDB through the built-in storage API.
+- No browser-exposed database keys are required.
+- Camera barcode scanning requires HTTPS in production; localhost works for
+  local testing.

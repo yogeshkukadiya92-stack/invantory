@@ -1,4 +1,4 @@
-import { createClient } from "@/lib/supabase/server";
+import { createClient } from "@/lib/mongodb/server";
 import { ShareLowStockButton } from "@/components/ShareLowStockButton";
 import type { BatchStockRow, StockRow } from "@/lib/types";
 
@@ -35,10 +35,17 @@ export default async function DashboardPage() {
   const totalProducts = rows.length;
   const totalValue = rows.reduce((sum, r) => sum + Number(r.stock_value), 0);
   const lowCount = lowStock?.length ?? 0;
-  const todayTotal = (todaySales ?? []).reduce(
+  const todayTotal = ((todaySales ?? []) as { grand_total: number }[]).reduce(
     (sum, s) => sum + Number(s.grand_total),
     0
   );
+  const recentMovementRows = (recentMovements ?? []) as {
+    created_at: string;
+    id: string;
+    products: { name: string } | null;
+    quantity: number;
+    type: "in" | "out" | "adjustment";
+  }[];
 
   const stats = [
     {
@@ -178,14 +185,14 @@ export default async function DashboardPage() {
               Recent activity
             </h2>
           </div>
-          {!recentMovements || recentMovements.length === 0 ? (
+          {recentMovementRows.length === 0 ? (
             <p className="px-4 py-6 text-sm text-stone-500">
               No stock entries yet. Add a product and record your first
               stock-in.
             </p>
           ) : (
             <ul className="divide-y divide-stone-100">
-              {recentMovements.map((m) => {
+              {recentMovementRows.map((m) => {
                 const productName =
                   (m.products as unknown as { name: string } | null)?.name ??
                   "Unknown product";

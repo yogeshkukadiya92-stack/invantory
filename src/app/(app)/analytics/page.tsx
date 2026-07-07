@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { createClient } from "@/lib/supabase/client";
+import { createClient } from "@/lib/mongodb/client";
 
 interface SaleLite {
   created_at: string;
@@ -62,11 +62,17 @@ export default function AnalyticsPage() {
       setSales((s ?? []) as SaleLite[]);
       setItems((it ?? []) as ItemLite[]);
       setReturnsTotal(
-        (rets ?? []).reduce((sum, r) => sum + Number(r.total), 0)
+        ((rets ?? []) as { total: number }[]).reduce(
+          (sum, r) => sum + Number(r.total),
+          0
+        )
       );
       setCostFallback(
         new Map(
-          (prods ?? []).map((p) => [p.id as string, Number(p.purchase_price)])
+          ((prods ?? []) as { id: string; purchase_price: number }[]).map((p) => [
+            p.id,
+            Number(p.purchase_price),
+          ])
         )
       );
       setLoading(false);
