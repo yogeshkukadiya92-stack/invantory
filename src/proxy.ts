@@ -26,13 +26,6 @@ export async function proxy(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  // Login thai gayu che ane /login par che → dashboard par mokli do
-  if (hasSession && isLoginPage) {
-    const url = request.nextUrl.clone();
-    url.pathname = "/dashboard";
-    return NextResponse.redirect(url);
-  }
-
   return response;
 }
 
