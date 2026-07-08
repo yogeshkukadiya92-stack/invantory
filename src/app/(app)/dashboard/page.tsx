@@ -1,4 +1,5 @@
 import { createClient } from "@/lib/mongodb/server";
+import { DashboardProductSearch } from "@/components/DashboardProductSearch";
 import { ShareLowStockButton } from "@/components/ShareLowStockButton";
 import type { BatchStockRow, StockRow } from "@/lib/types";
 
@@ -84,6 +85,8 @@ export default async function DashboardPage() {
           </div>
         ))}
       </div>
+
+      <DashboardProductSearch products={rows} />
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         {/* Low stock list */}

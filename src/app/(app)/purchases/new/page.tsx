@@ -45,6 +45,18 @@ export default function NewPurchasePage() {
       setLocations(locList);
       const def = locList.find((l) => l.is_default) ?? locList[0];
       if (def) setLocationId(def.id);
+
+      const productId = new URLSearchParams(window.location.search).get("product_id");
+      if (productId) {
+        const { data: productData } = await supabase
+          .from("current_stock")
+          .select("*")
+          .eq("product_id", productId)
+          .eq("is_active", true)
+          .limit(1);
+        const product = ((productData ?? []) as StockRow[])[0];
+        if (product) addProduct(product);
+      }
     }
     loadInitial();
     searchRef.current?.focus();
