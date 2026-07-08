@@ -167,7 +167,7 @@ export default function ScanPage() {
     const result = data as MovementResult;
     showToast(
       "ok",
-      `${product.name}: ${type === "in" ? "+" : "−"}${qty} → have ${result.new_stock} ${product.unit}`
+      `${product.name}: ${type === "in" ? "Stock in" : "Stock out"} ${qty} → have ${result.new_stock} ${product.unit}`
     );
     // Next scan mate reset
     setProduct(null);

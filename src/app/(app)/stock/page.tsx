@@ -610,8 +610,8 @@ export default function StockPage() {
                     : m.type === "out"
                       ? "bg-amber-50 text-amber-700"
                       : "bg-stone-100 text-stone-600";
-                const sign =
-                  m.type === "in" ? "+" : m.type === "out" ? "−" : m.quantity > 0 ? "+" : "";
+                const label =
+                  m.type === "in" ? "In" : m.type === "out" ? "Out" : "Adjust";
                 return (
                   <li
                     key={m.id}
@@ -637,8 +637,7 @@ export default function StockPage() {
                     <span
                       className={`ml-3 shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${badge}`}
                     >
-                      {sign}
-                      {m.type === "adjustment" ? m.quantity : Math.abs(m.quantity)}
+                      {label} {Math.abs(m.quantity)}
                     </span>
                   </li>
                 );

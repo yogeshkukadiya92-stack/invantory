@@ -144,6 +144,10 @@ function signedMovement(row: DocumentRow) {
   return toNumber(row.quantity);
 }
 
+function publicStock(value: unknown) {
+  return Math.max(0, toNumber(value));
+}
+
 function error(message: string): QueryResult {
   return { data: null, error: { message } };
 }
@@ -175,6 +179,10 @@ async function ensureIndexes(db: Db) {
     db.collection("sale_returns").createIndex(
       { return_no: 1 },
       { unique: true }
+    ),
+    db.collection("stock_movements").createIndex(
+      { repair_key: 1 },
+      { sparse: true, unique: true }
     ),
   ]);
 }
@@ -247,6 +255,109 @@ async function normalizeStockMovements(db: Db) {
   );
 }
 
+async function repairNegativeStock(db: Db) {
+  const [products, movements] = await Promise.all([
+    db.collection("products").find({}).toArray(),
+    db.collection("stock_movements").find({}).toArray(),
+  ]);
+  const productIds = new Set(products.map((product) => rowPublicId(product)));
+  const byLocation = new Map<string, DocumentRow>();
+  const byBatch = new Map<string, DocumentRow>();
+
+  for (const movement of movements) {
+    const productId = String(movement.product_id ?? "");
+    const locationId = String(movement.location_id ?? "");
+    if (!productId || !locationId || !productIds.has(productId)) continue;
+
+    const locationKey = `${productId}\u0000${locationId}`;
+    const locationRow =
+      byLocation.get(locationKey) ??
+      {
+        location_id: locationId,
+        product_id: productId,
+        stock: 0,
+      };
+    locationRow.stock += signedMovement(movement);
+    byLocation.set(locationKey, locationRow);
+
+    if (movement.batch_id) {
+      const batchId = String(movement.batch_id);
+      const batchKey = `${productId}\u0000${locationId}\u0000${batchId}`;
+      const batchRow =
+        byBatch.get(batchKey) ??
+        {
+          batch_id: batchId,
+          location_id: locationId,
+          product_id: productId,
+          stock: 0,
+        };
+      batchRow.stock += signedMovement(movement);
+      byBatch.set(batchKey, batchRow);
+    }
+  }
+
+  const created_at = nowIso();
+  const corrections: DocumentRow[] = [];
+
+  for (const row of byBatch.values()) {
+    const stock = toNumber(row.stock);
+    if (stock >= 0) continue;
+    corrections.push({
+      batch_id: row.batch_id,
+      created_at,
+      created_by: null,
+      id: randomUUID(),
+      location_id: row.location_id,
+      product_id: row.product_id,
+      quantity: Math.abs(stock),
+      repair_key: `negative-stock-v1:${row.product_id}:${row.location_id}:${row.batch_id}:${Math.abs(stock)}`,
+      reason: "System correction: negative stock reset to 0",
+      supplier_id: null,
+      type: "adjustment",
+    });
+  }
+
+  for (const row of byLocation.values()) {
+    const stock = toNumber(row.stock);
+    if (stock >= 0) continue;
+    const batchFix = corrections
+      .filter(
+        (correction) =>
+          correction.product_id === row.product_id &&
+          correction.location_id === row.location_id
+      )
+      .reduce((sum, correction) => sum + toNumber(correction.quantity), 0);
+    const remaining = Math.abs(stock) - batchFix;
+    if (remaining <= 0) continue;
+    corrections.push({
+      batch_id: null,
+      created_at,
+      created_by: null,
+      id: randomUUID(),
+      location_id: row.location_id,
+      product_id: row.product_id,
+      quantity: remaining,
+      repair_key: `negative-stock-v1:${row.product_id}:${row.location_id}:none:${remaining}`,
+      reason: "System correction: negative stock reset to 0",
+      supplier_id: null,
+      type: "adjustment",
+    });
+  }
+
+  if (corrections.length > 0) {
+    await db.collection("stock_movements").bulkWrite(
+      corrections.map((correction) => ({
+        updateOne: {
+          filter: { repair_key: correction.repair_key },
+          update: { $setOnInsert: correction },
+          upsert: true,
+        },
+      })),
+      { ordered: false }
+    );
+  }
+}
+
 export async function prepareDatabase(db?: Db) {
   const database = db ?? (await getDb());
   await ensureDefaults(database);
@@ -254,6 +365,7 @@ export async function prepareDatabase(db?: Db) {
   await normalizeProducts(database);
   await normalizeStockMovements(database);
   await ensureIndexes(database);
+  await repairNegativeStock(database);
   return database;
 }
 
@@ -280,7 +392,7 @@ async function nextCode(db: Db, key: string, prefix: string) {
   return `${prefix}-${yearMonth}-${String(number).padStart(4, "0")}`;
 }
 
-async function currentStockRows(db: Db) {
+async function currentStockRows(db: Db): Promise<DocumentRow[]> {
   const [products, movements] = await Promise.all([
     db.collection("products").find({}).toArray(),
     db.collection("stock_movements").find({}).toArray(),
@@ -292,7 +404,7 @@ async function currentStockRows(db: Db) {
   }
   return products.map((product) => {
     const productId = rowPublicId(product);
-    const stock = stockByProduct.get(productId) ?? 0;
+    const stock = publicStock(stockByProduct.get(productId) ?? 0);
     return publicRow({
       ...product,
       product_id: productId,
@@ -302,7 +414,7 @@ async function currentStockRows(db: Db) {
   });
 }
 
-async function locationStockRows(db: Db) {
+async function locationStockRows(db: Db): Promise<DocumentRow[]> {
   const [movements, products, locations] = await Promise.all([
     db.collection("stock_movements").find({}).toArray(),
     db.collection("products").find({}).toArray(),
@@ -330,10 +442,13 @@ async function locationStockRows(db: Db) {
     row.stock += signedMovement(movement);
     totals.set(key, row);
   }
-  return [...totals.values()];
+  return [...totals.values()].map((row) => ({
+    ...row,
+    stock: publicStock(row.stock),
+  }));
 }
 
-async function batchStockRows(db: Db) {
+async function batchStockRows(db: Db): Promise<DocumentRow[]> {
   const [movements, products, locations, batches] = await Promise.all([
     db.collection("stock_movements").find({ batch_id: { $ne: null } }).toArray(),
     db.collection("products").find({}).toArray(),
@@ -366,10 +481,13 @@ async function batchStockRows(db: Db) {
     row.stock += signedMovement(movement);
     totals.set(key, row);
   }
-  return [...totals.values()];
+  return [...totals.values()].map((row) => ({
+    ...row,
+    stock: publicStock(row.stock),
+  }));
 }
 
-async function saleItemsDatedRows(db: Db) {
+async function saleItemsDatedRows(db: Db): Promise<DocumentRow[]> {
   const [items, sales] = await Promise.all([
     db.collection("sale_items").find({}).toArray(),
     db.collection("sales").find({}).toArray(),
@@ -385,7 +503,7 @@ async function saleItemsDatedRows(db: Db) {
   });
 }
 
-async function rowsForTable(db: Db, table: string) {
+async function rowsForTable(db: Db, table: string): Promise<DocumentRow[]> {
   if (table === "current_stock") return currentStockRows(db);
   if (table === "low_stock") {
     const rows = await currentStockRows(db);
@@ -562,13 +680,97 @@ function makeInsertRows(table: string, values: unknown, user: MongoUser | null) 
   });
 }
 
+function stockKey(productId: string, locationId: string, batchId?: string | null) {
+  return [productId, locationId, batchId ?? ""].join("\u0000");
+}
+
+async function validateStockMovementRows(db: Db, rows: DocumentRow[]) {
+  const productIds = [
+    ...new Set(
+      rows
+        .map((row) => String(row.product_id ?? "").trim())
+        .filter(Boolean)
+    ),
+  ];
+  const products =
+    productIds.length > 0
+      ? await db.collection("products").find(idFilter(productIds)).toArray()
+      : [];
+  const validProductIds = new Set(products.map((product) => rowPublicId(product)));
+  const locationDeltas = new Map<string, number>();
+  const batchDeltas = new Map<string, number>();
+
+  for (const row of rows) {
+    const productId = String(row.product_id ?? "").trim();
+    const locationId = String(row.location_id ?? "").trim();
+    const batchId = row.batch_id ? String(row.batch_id) : null;
+    const type = String(row.type ?? "");
+    const quantity = toNumber(row.quantity);
+
+    if (!["in", "out", "adjustment"].includes(type)) {
+      throw new Error(`Invalid movement type: ${type}`);
+    }
+    if (!productId || !validProductIds.has(productId)) {
+      throw new Error("Product not found");
+    }
+    if (!locationId) throw new Error("Location not found");
+    if (type !== "adjustment" && quantity <= 0) {
+      throw new Error("Quantity 0 thi vadhare hovi joie");
+    }
+    if (type === "adjustment" && quantity === 0) {
+      throw new Error("Adjustment 0 na hoi shake");
+    }
+
+    const locationKey = stockKey(productId, locationId);
+    const pendingLocationDelta = locationDeltas.get(locationKey) ?? 0;
+    const currentLocationStock =
+      (type === "in" ? 0 : await getLocationStock(db, productId, locationId)) +
+      pendingLocationDelta;
+
+    if (type === "out" && currentLocationStock < quantity) {
+      throw new Error(`Aa location par stock ochho che (available: ${currentLocationStock})`);
+    }
+    if (type === "adjustment" && currentLocationStock + quantity < 0) {
+      throw new Error(`Adjustment thi stock negative thai jashe (current: ${currentLocationStock})`);
+    }
+
+    if (batchId && type !== "in") {
+      const batchKey = stockKey(productId, locationId, batchId);
+      const pendingBatchDelta = batchDeltas.get(batchKey) ?? 0;
+      const currentBatchStock =
+        (await getLocationStock(db, productId, locationId, batchId)) +
+        pendingBatchDelta;
+      if (type === "out" && currentBatchStock < quantity) {
+        throw new Error(`Aa batch ma stock ochho che (available: ${currentBatchStock})`);
+      }
+      if (type === "adjustment" && currentBatchStock + quantity < 0) {
+        throw new Error(`Adjustment thi batch stock negative thai jashe (current: ${currentBatchStock})`);
+      }
+    }
+
+    const delta = type === "out" ? -quantity : quantity;
+    locationDeltas.set(locationKey, pendingLocationDelta + delta);
+    if (batchId) {
+      const batchKey = stockKey(productId, locationId, batchId);
+      batchDeltas.set(batchKey, (batchDeltas.get(batchKey) ?? 0) + delta);
+    }
+
+    row.product_id = productId;
+    row.location_id = locationId;
+    row.batch_id = batchId;
+    row.type = type;
+    row.quantity = quantity;
+  }
+}
+
 async function insertRows(db: Db, query: QueryRequest, user: MongoUser | null) {
   const rows = makeInsertRows(query.table, query.values, user);
   if (query.table === "stock_movements") {
     const defaultLocationId = await getDefaultLocationId(db);
     rows.forEach((row) => {
-      row.location_id = row.location_id ?? defaultLocationId;
+      row.location_id = row.location_id || defaultLocationId;
     });
+    await validateStockMovementRows(db, rows);
   }
   if (rows.length === 0) return [];
   await db.collection(query.table).insertMany(rows);
@@ -579,6 +781,19 @@ async function updateRows(db: Db, query: QueryRequest) {
   const rows = applyFilters(await rowsForTable(db, query.table), query);
   const values = { ...(query.values as DocumentRow) };
   const unset: DocumentRow = {};
+  if (query.table === "stock_movements") {
+    const balanceFields = new Set([
+      "batch_id",
+      "location_id",
+      "product_id",
+      "quantity",
+      "type",
+    ]);
+    const changesBalance = Object.keys(values).some((key) => balanceFields.has(key));
+    if (changesBalance) {
+      throw new Error("Stock quantity entry edit nathi thai shakti. Correction mate Set stock entry karo.");
+    }
+  }
   if (query.table === "products") {
     values.updated_at = values.updated_at ?? nowIso();
     if (values.sku === null || values.sku === "") {
@@ -609,6 +824,9 @@ async function updateRows(db: Db, query: QueryRequest) {
 async function deleteRows(db: Db, query: QueryRequest) {
   const rows = applyFilters(await rowsForTable(db, query.table), query);
   const ids = rows.map((row) => row.id).filter(Boolean);
+  if (query.table === "stock_movements") {
+    throw new Error("Stock entries delete nathi thai shakti. Correction mate Set stock entry karo.");
+  }
   if (query.table === "categories") {
     await db.collection("products").updateMany({ category_id: { $in: ids } }, { $set: { category_id: null } });
   }

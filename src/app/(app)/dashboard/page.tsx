@@ -202,7 +202,8 @@ export default async function DashboardPage() {
                     : m.type === "out"
                       ? "bg-amber-50 text-amber-700"
                       : "bg-stone-100 text-stone-600";
-                const sign = m.type === "in" ? "+" : m.type === "out" ? "−" : "±";
+                const label =
+                  m.type === "in" ? "In" : m.type === "out" ? "Out" : "Adjust";
                 return (
                   <li
                     key={m.id}
@@ -222,7 +223,7 @@ export default async function DashboardPage() {
                     <span
                       className={`rounded-full px-2.5 py-1 text-xs font-semibold ${badge}`}
                     >
-                      {sign}
+                      {label}{" "}
                       {Math.abs(m.quantity)}
                     </span>
                   </li>
