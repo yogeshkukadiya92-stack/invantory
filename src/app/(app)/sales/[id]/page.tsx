@@ -104,6 +104,12 @@ export default function SaleDetailPage({
         </Link>
         <div className="flex flex-wrap gap-2">
           <Link
+            href={`/sales/${sale.id}/edit`}
+            className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
+          >
+            Edit
+          </Link>
+          <Link
             href={`/sales/${sale.id}/return`}
             className="rounded-lg border border-amber-600 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50"
           >

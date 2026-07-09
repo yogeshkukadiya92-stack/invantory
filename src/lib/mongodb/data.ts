@@ -939,8 +939,12 @@ export async function executeRpc(
     if (name === "record_movement") return { data: await recordMovement(db, args, user), error: null };
     if (name === "transfer_stock") return { data: await transferStock(db, args, user), error: null };
     if (name === "create_sale") return { data: await createSale(db, args, user), error: null };
+    if (name === "update_sale") return { data: await updateSale(db, args, user), error: null };
     if (name === "create_purchase_order") {
       return { data: await createPurchaseOrder(db, args, user), error: null };
+    }
+    if (name === "update_purchase_order") {
+      return { data: await updatePurchaseOrder(db, args, user), error: null };
     }
     if (name === "receive_purchase_order") {
       return { data: await receivePurchaseOrder(db, args, user), error: null };
@@ -1187,6 +1191,120 @@ async function createSale(db: Db, args: DocumentRow, user: MongoUser) {
   return { grand_total: grandTotal, invoice_no: invoiceNo, sale_id: saleId };
 }
 
+async function updateSale(db: Db, args: DocumentRow, user: MongoUser) {
+  const saleId = String(args.p_sale_id ?? "");
+  const sale = await db.collection("sales").findOne({ id: saleId });
+  if (!sale) throw new Error("Sale not found");
+  const existingReturns = await db.collection("sale_returns").countDocuments({ sale_id: saleId });
+  if (existingReturns > 0) {
+    throw new Error("Aa sale par return thayu che, items edit nathi thai shakta");
+  }
+  const items = Array.isArray(args.p_items) ? args.p_items : [];
+  if (items.length === 0) throw new Error("Sale ma ochha ma ochhi 1 item joie");
+  const discount = toNumber(args.p_discount);
+  if (discount < 0) throw new Error("Discount negative na hoi shake");
+  const oldMovements = await db.collection("stock_movements").find({ sale_id: saleId }).toArray();
+  const locationId =
+    args.p_location_id ? String(args.p_location_id) :
+    oldMovements[0]?.location_id ? String(oldMovements[0].location_id) :
+    await getDefaultLocationId(db);
+  const products = await db
+    .collection("products")
+    .find(idFilter(items.map((item) => String(item.product_id ?? ""))))
+    .toArray();
+  const productMap = new Map(products.map((product) => [rowPublicId(product), product]));
+  const oldOutByProduct = new Map<string, number>();
+  for (const movement of oldMovements) {
+    if (String(movement.location_id) !== locationId) continue;
+    const productId = String(movement.product_id);
+    oldOutByProduct.set(productId, (oldOutByProduct.get(productId) ?? 0) + toNumber(movement.quantity));
+  }
+
+  for (const item of items) {
+    const productId = String(item.product_id ?? "");
+    const product = productMap.get(productId);
+    const quantity = toNumber(item.quantity);
+    const price = toNumber(item.price);
+    if (!product) throw new Error("Product not found");
+    if (quantity <= 0) throw new Error("Quantity 0 thi vadhare hovi joie");
+    if (price < 0) throw new Error("Price valid nathi");
+    const available = await getLocationStock(db, productId, locationId) + (oldOutByProduct.get(productId) ?? 0);
+    if (available < quantity) {
+      throw new Error(`"${product.name}" no aa location par stock ochho che (available: ${available})`);
+    }
+  }
+
+  let subtotal = 0;
+  let taxTotal = 0;
+  const saleItems: DocumentRow[] = [];
+  const movements: DocumentRow[] = [];
+  const updated_at = nowIso();
+
+  for (const item of items) {
+    const product = productMap.get(String(item.product_id))!;
+    const productId = rowPublicId(product);
+    const quantity = toNumber(item.quantity);
+    const price = toNumber(item.price);
+    const line = round2(quantity * price);
+    subtotal += line;
+    taxTotal += round2((line * toNumber(product.gst_rate)) / 100);
+    saleItems.push({
+      cost: toNumber(product.purchase_price),
+      gst_rate: toNumber(product.gst_rate),
+      hsn_code: product.hsn_code ?? null,
+      id: randomUUID(),
+      line_total: line,
+      price,
+      product_id: productId,
+      product_name: product.name,
+      quantity,
+      sale_id: saleId,
+      unit: product.unit,
+    });
+    movements.push({
+      created_at: updated_at,
+      created_by: user.id,
+      id: randomUUID(),
+      location_id: locationId,
+      product_id: productId,
+      quantity,
+      reason: `Edited sale ${sale.invoice_no}`,
+      sale_id: saleId,
+      type: "out",
+    });
+  }
+
+  const grandTotal = round2(subtotal + taxTotal - discount);
+  if (grandTotal < 0) throw new Error("Discount total karta vadhare na hoi shake");
+  let paidAmount = args.p_paid_amount == null ? grandTotal : toNumber(args.p_paid_amount);
+  paidAmount = Math.max(0, Math.min(paidAmount, grandTotal));
+  const status = paidAmount >= grandTotal ? "paid" : paidAmount === 0 ? "unpaid" : "partial";
+
+  await db.collection("sale_items").deleteMany({ sale_id: saleId });
+  await db.collection("stock_movements").deleteMany({ sale_id: saleId });
+  if (saleItems.length) await db.collection("sale_items").insertMany(saleItems);
+  if (movements.length) await db.collection("stock_movements").insertMany(movements);
+  await db.collection("sales").updateOne(
+    { id: saleId },
+    {
+      $set: {
+        customer_id: args.p_customer_id ?? null,
+        discount,
+        grand_total: grandTotal,
+        note: args.p_note ?? null,
+        paid_amount: paidAmount,
+        payment_method: args.p_payment_method ?? sale.payment_method ?? "cash",
+        status,
+        subtotal: round2(subtotal),
+        tax_total: round2(taxTotal),
+        updated_at,
+        updated_by: user.id,
+      },
+    }
+  );
+  return { grand_total: grandTotal, sale_id: saleId };
+}
+
 async function createPurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
   const items = Array.isArray(args.p_items) ? args.p_items : [];
   if (items.length === 0) throw new Error("PO ma ochha ma ochhi 1 item joie");
@@ -1233,6 +1351,100 @@ async function createPurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
   });
   await db.collection("purchase_order_items").insertMany(poItems);
   return { po_id: poId, po_no: poNo, total };
+}
+
+async function updatePurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
+  const poId = String(args.p_po_id ?? "");
+  const po = await db.collection("purchase_orders").findOne({ id: poId });
+  if (!po) throw new Error("PO not found");
+  if (po.status === "cancelled") throw new Error("Cancelled PO edit nathi thai shaktu");
+  const items = Array.isArray(args.p_items) ? args.p_items : [];
+  if (items.length === 0) throw new Error("PO ma ochha ma ochhi 1 item joie");
+  const oldMovements = await db.collection("stock_movements").find({ po_id: poId }).toArray();
+  const locationId =
+    args.p_location_id ? String(args.p_location_id) :
+    oldMovements[0]?.location_id ? String(oldMovements[0].location_id) :
+    await getDefaultLocationId(db);
+  const products = await db
+    .collection("products")
+    .find(idFilter(items.map((item) => String(item.product_id ?? ""))))
+    .toArray();
+  const productMap = new Map(products.map((product) => [rowPublicId(product), product]));
+  const oldInByProduct = new Map<string, number>();
+  for (const movement of oldMovements) {
+    if (String(movement.location_id) !== locationId) continue;
+    const productId = String(movement.product_id);
+    oldInByProduct.set(productId, (oldInByProduct.get(productId) ?? 0) + toNumber(movement.quantity));
+  }
+  if (po.status === "received") {
+    for (const [productId, oldQuantity] of oldInByProduct) {
+      const availableAfterReverse = await getLocationStock(db, productId, locationId) - oldQuantity;
+      if (availableAfterReverse < 0) {
+        const product = await db.collection("products").findOne(singleIdFilter(productId));
+        throw new Error(`"${product?.name ?? "Product"}" no stock already use thai gayo che, received PO edit nathi thai shaktu`);
+      }
+    }
+  }
+
+  let total = 0;
+  const poItems: DocumentRow[] = [];
+  for (const item of items) {
+    const productId = String(item.product_id ?? "");
+    const product = productMap.get(productId);
+    const quantity = toNumber(item.quantity);
+    const cost = toNumber(item.cost);
+    if (!product) throw new Error("Product not found");
+    if (quantity <= 0) throw new Error("Quantity 0 thi vadhare hovi joie");
+    if (cost < 0) throw new Error("Cost valid nathi");
+    const line = round2(quantity * cost);
+    total += line;
+    poItems.push({
+      cost,
+      id: randomUUID(),
+      line_total: line,
+      po_id: poId,
+      product_id: rowPublicId(product),
+      product_name: product.name,
+      quantity,
+      unit: product.unit,
+    });
+  }
+  total = round2(total);
+
+  await db.collection("purchase_order_items").deleteMany({ po_id: poId });
+  await db.collection("purchase_order_items").insertMany(poItems);
+  await db.collection("stock_movements").deleteMany({ po_id: poId });
+  if (po.status === "received") {
+    const created_at = nowIso();
+    const movements = poItems
+      .filter((item) => item.product_id)
+      .map((item) => ({
+        created_at,
+        created_by: user.id,
+        id: randomUUID(),
+        location_id: locationId,
+        po_id: poId,
+        product_id: item.product_id,
+        quantity: toNumber(item.quantity),
+        reason: `Edited PO ${po.po_no}`,
+        supplier_id: args.p_supplier_id ?? po.supplier_id ?? null,
+        type: "in",
+      }));
+    if (movements.length) await db.collection("stock_movements").insertMany(movements);
+  }
+  await db.collection("purchase_orders").updateOne(
+    { id: poId },
+    {
+      $set: {
+        note: args.p_note ?? null,
+        supplier_id: args.p_supplier_id ?? null,
+        total,
+        updated_at: nowIso(),
+        updated_by: user.id,
+      },
+    }
+  );
+  return { po_id: poId, total };
 }
 
 async function receivePurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {

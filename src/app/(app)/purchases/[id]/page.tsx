@@ -127,6 +127,12 @@ export default function PurchaseDetailPage({
         </Link>
         {po.status === "ordered" && (
           <div className="flex flex-wrap gap-2">
+            <Link
+              href={`/purchases/${po.id}/edit`}
+              className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
+            >
+              Edit
+            </Link>
             {locations.length > 1 && (
               <select
                 className="rounded-lg border border-stone-300 bg-white px-2 py-2 text-sm"
@@ -156,6 +162,14 @@ export default function PurchaseDetailPage({
               {busy ? "Processing..." : "✓ Receive goods"}
             </button>
           </div>
+        )}
+        {po.status === "received" && (
+          <Link
+            href={`/purchases/${po.id}/edit`}
+            className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
+          >
+            Edit
+          </Link>
         )}
       </div>
 
