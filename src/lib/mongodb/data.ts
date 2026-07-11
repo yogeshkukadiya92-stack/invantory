@@ -41,6 +41,13 @@ export interface QueryResult<T = unknown> {
 
 type DocumentRow = Record<string, any>;
 
+declare global {
+  // eslint-disable-next-line no-var
+  var __inventoryDatabasePreparation: Promise<void> | undefined;
+  // eslint-disable-next-line no-var
+  var __inventoryStockMutationQueue: Promise<void> | undefined;
+}
+
 const COLLECTIONS = new Set([
   "allowed_emails",
   "batches",
@@ -77,6 +84,63 @@ const ID_COLLECTIONS = [
   "suppliers",
 ];
 
+const VIRTUAL_TABLES = new Set([
+  "batch_stock",
+  "current_stock",
+  "expiring_stock",
+  "location_stock",
+  "low_stock",
+  "sale_items_dated",
+]);
+
+const ADMIN_WRITE_TABLES = new Set([
+  "allowed_emails",
+  "business_settings",
+  "categories",
+  "locations",
+  "profiles",
+]);
+
+const NON_DELETABLE_TABLES = new Set([
+  "business_settings",
+  "products",
+  "profiles",
+  "stock_movements",
+]);
+
+const WRITE_FIELDS: Record<string, Set<string>> = {
+  allowed_emails: new Set(["added_by", "email"]),
+  business_settings: new Set([
+    "address",
+    "gstin",
+    "invoice_prefix",
+    "name",
+    "phone",
+    "updated_at",
+  ]),
+  categories: new Set(["name"]),
+  customers: new Set(["address", "gstin", "name", "phone"]),
+  locations: new Set(["is_default", "name"]),
+  products: new Set([
+    "barcode",
+    "category_id",
+    "gst_rate",
+    "hsn_code",
+    "image_url",
+    "is_active",
+    "min_stock_level",
+    "mrp",
+    "name",
+    "purchase_price",
+    "selling_price",
+    "sku",
+    "unit",
+    "weight_grams",
+  ]),
+  profiles: new Set(["role"]),
+  suppliers: new Set(["address", "name", "phone"]),
+};
+
 function nowIso() {
   return new Date().toISOString();
 }
@@ -84,6 +148,152 @@ function nowIso() {
 function toNumber(value: unknown) {
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function finiteNumber(value: unknown, field: string) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) throw new Error(`${field} valid number hovu joie`);
+  return number;
+}
+
+function requireNonNegativeNumber(value: unknown, field: string) {
+  const number = finiteNumber(value, field);
+  if (number < 0) throw new Error(`${field} negative na hoi shake`);
+  return number;
+}
+
+function cleanText(value: unknown, field: string, maxLength: number, required = false) {
+  const text = String(value ?? "").trim();
+  if (required && !text) throw new Error(`${field} jaruri che`);
+  if (text.length > maxLength) throw new Error(`${field} bahu lambu che`);
+  return text;
+}
+
+function validateMutationFields(table: string, values: unknown) {
+  const allowed = WRITE_FIELDS[table];
+  if (!allowed) throw new Error(`${table} direct edit nathi thai shaktu`);
+  const rows = Array.isArray(values) ? values : [values];
+  for (const value of rows) {
+    if (!value || typeof value !== "object") throw new Error("Invalid data");
+    const invalid = Object.keys(value as DocumentRow).find((field) => !allowed.has(field));
+    if (invalid) throw new Error(`${table}.${invalid} edit karvani permission nathi`);
+  }
+}
+
+function normalizeProductValues(row: DocumentRow) {
+  if ("name" in row) row.name = cleanText(row.name, "Product name", 200, true);
+  if ("unit" in row) {
+    row.unit = cleanText(row.unit, "Unit", 30, true);
+    if (/^-?\d+(\.\d+)?$/.test(row.unit)) {
+      throw new Error("Unit ma pcs/kg/box lakho. Quantity alag field ma nakho.");
+    }
+  }
+  for (const field of [
+    "purchase_price",
+    "selling_price",
+    "min_stock_level",
+    "gst_rate",
+  ]) {
+    if (field in row) row[field] = requireNonNegativeNumber(row[field], field);
+  }
+  if ("gst_rate" in row && toNumber(row.gst_rate) > 100) {
+    throw new Error("GST rate 100 karta vadhu na hoi shake");
+  }
+  for (const field of ["mrp", "weight_grams"]) {
+    if (!(field in row)) continue;
+    row[field] =
+      row[field] === "" || row[field] === null
+        ? null
+        : requireNonNegativeNumber(row[field], field);
+  }
+  if ("sku" in row) row.sku = cleanText(row.sku, "SKU", 120) || null;
+  if ("barcode" in row) row.barcode = cleanText(row.barcode, "Barcode", 120) || null;
+  if ("hsn_code" in row) row.hsn_code = cleanText(row.hsn_code, "HSN code", 40) || null;
+  if ("category_id" in row) {
+    row.category_id = cleanText(row.category_id, "Category", 120) || null;
+  }
+  if ("image_url" in row && row.image_url !== null) {
+    row.image_url = cleanText(row.image_url, "Image URL", 500);
+  }
+}
+
+function normalizeSimpleValues(table: string, row: DocumentRow) {
+  if (table === "products") normalizeProductValues(row);
+  if (table === "customers") {
+    if ("name" in row) row.name = cleanText(row.name, "Customer name", 160, true);
+    if ("phone" in row) row.phone = cleanText(row.phone, "Phone", 40) || null;
+    if ("gstin" in row) row.gstin = cleanText(row.gstin, "GSTIN", 30) || null;
+    if ("address" in row) row.address = cleanText(row.address, "Address", 500) || null;
+  }
+  if (["categories", "locations", "suppliers"].includes(table) && "name" in row) {
+    row.name = cleanText(row.name, "Name", 160, true);
+  }
+  if (table === "suppliers") {
+    if ("phone" in row) row.phone = cleanText(row.phone, "Phone", 40) || null;
+    if ("address" in row) row.address = cleanText(row.address, "Address", 500) || null;
+  }
+  if (
+    table === "profiles" &&
+    "role" in row &&
+    !["admin", "staff"].includes(String(row.role))
+  ) {
+    throw new Error("Invalid role");
+  }
+  if (table === "allowed_emails" && "email" in row) {
+    row.email = cleanText(row.email, "Email", 254, true).toLowerCase();
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(row.email)) {
+      throw new Error("Valid email nakho");
+    }
+  }
+}
+
+function assertQueryPermission(query: QueryRequest, user: MongoUser | null) {
+  if (!user) throw new Error("Not authenticated");
+  if (!["select", "insert", "update", "delete"].includes(query.action)) {
+    throw new Error("Invalid data action");
+  }
+  if (!COLLECTIONS.has(query.table) && !VIRTUAL_TABLES.has(query.table)) {
+    throw new Error(`Unknown table: ${query.table}`);
+  }
+  if (query.action === "select") {
+    if (query.table === "allowed_emails" && user.role !== "admin") {
+      throw new Error("Aa data mate admin role joie");
+    }
+    return;
+  }
+  if (VIRTUAL_TABLES.has(query.table)) throw new Error("Aa view edit nathi thai shakti");
+  if (query.table === "stock_movements") {
+    throw new Error("Stock entries mate approved stock action vapro");
+  }
+  if (query.table === "products" && query.action === "insert") {
+    throw new Error("Product create karva approved product action vapro");
+  }
+  if (ADMIN_WRITE_TABLES.has(query.table) && user.role !== "admin") {
+    throw new Error("Aa action mate admin role joie");
+  }
+  if (
+    query.table === "suppliers" &&
+    query.action !== "insert" &&
+    user.role !== "admin"
+  ) {
+    throw new Error("Aa action mate admin role joie");
+  }
+  if (!WRITE_FIELDS[query.table]) {
+    throw new Error(`${query.table} direct edit nathi thai shaktu`);
+  }
+  if (query.action === "delete" && NON_DELETABLE_TABLES.has(query.table)) {
+    throw new Error(`${query.table} delete nathi thai shaktu`);
+  }
+  if (query.action !== "delete") validateMutationFields(query.table, query.values);
+}
+
+function assertUniqueValues(items: DocumentRow[], field: string, label: string) {
+  const seen = new Set<string>();
+  for (const item of items) {
+    const value = String(item[field] ?? "");
+    if (!value || seen.has(value)) throw new Error(`${label} duplicate nathi hoi shaktu`);
+    seen.add(value);
+  }
 }
 
 function round2(value: number) {
@@ -152,9 +362,27 @@ function error(message: string): QueryResult {
   return { data: null, error: { message } };
 }
 
+async function serializeStockMutation<T>(operation: () => Promise<T>): Promise<T> {
+  const previous = global.__inventoryStockMutationQueue ?? Promise.resolve();
+  let release: () => void = () => undefined;
+  const current = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  global.__inventoryStockMutationQueue = previous
+    .catch(() => undefined)
+    .then(() => current);
+  await previous.catch(() => undefined);
+  try {
+    return await operation();
+  } finally {
+    release();
+  }
+}
+
 async function ensureIndexes(db: Db) {
   await Promise.all([
     db.collection("profiles").createIndex({ email: 1 }, { unique: true }),
+    db.collection("allowed_emails").createIndex({ email: 1 }),
     db.collection("categories").createIndex({ name: 1 }, { unique: true }),
     db.collection("products").createIndex(
       { sku: 1 },
@@ -164,24 +392,48 @@ async function ensureIndexes(db: Db) {
       { barcode: 1 },
       { sparse: true, unique: true }
     ),
+    db.collection("products").createIndex({ is_active: 1, name: 1 }),
     db.collection("customers").createIndex({ name: 1 }),
     db.collection("locations").createIndex({ name: 1 }, { unique: true }),
     db.collection("suppliers").createIndex({ name: 1 }),
+    db.collection("files").createIndex({ bucket: 1, path: 1 }, { unique: true }),
     db.collection("batches").createIndex(
       { product_id: 1, batch_no: 1 },
       { unique: true }
     ),
     db.collection("sales").createIndex({ invoice_no: 1 }, { unique: true }),
+    db.collection("sales").createIndex({ created_at: -1 }),
+    db.collection("sales").createIndex({ customer_id: 1, created_at: -1 }),
+    db.collection("sales").createIndex({ status: 1, created_at: -1 }),
+    db.collection("sale_items").createIndex({ sale_id: 1 }),
+    db.collection("sale_items").createIndex({ product_id: 1 }),
     db.collection("purchase_orders").createIndex(
       { po_no: 1 },
       { unique: true }
     ),
+    db.collection("purchase_orders").createIndex({ created_at: -1 }),
+    db.collection("purchase_orders").createIndex({ supplier_id: 1, created_at: -1 }),
+    db.collection("purchase_orders").createIndex({ status: 1, created_at: -1 }),
+    db.collection("purchase_order_items").createIndex({ po_id: 1 }),
     db.collection("sale_returns").createIndex(
       { return_no: 1 },
       { unique: true }
     ),
+    db.collection("sale_returns").createIndex({ created_at: -1 }),
+    db.collection("sale_returns").createIndex({ sale_id: 1, created_at: -1 }),
+    db.collection("sale_return_items").createIndex({ return_id: 1 }),
+    db.collection("sale_return_items").createIndex({ sale_item_id: 1 }),
+    db.collection("stock_movements").createIndex({ created_at: -1 }),
+    db.collection("stock_movements").createIndex({ product_id: 1, created_at: -1 }),
+    db.collection("stock_movements").createIndex({ location_id: 1, product_id: 1 }),
+    db.collection("stock_movements").createIndex({ sale_id: 1 }),
+    db.collection("stock_movements").createIndex({ return_id: 1 }),
     db.collection("stock_movements").createIndex(
       { repair_key: 1 },
+      { sparse: true, unique: true }
+    ),
+    db.collection("stock_movements").createIndex(
+      { po_id: 1, product_id: 1 },
       { sparse: true, unique: true }
     ),
   ]);
@@ -360,12 +612,27 @@ async function repairNegativeStock(db: Db) {
 
 export async function prepareDatabase(db?: Db) {
   const database = db ?? (await getDb());
-  await ensureDefaults(database);
-  await ensureDocumentIds(database);
-  await normalizeProducts(database);
-  await normalizeStockMovements(database);
-  await ensureIndexes(database);
-  await repairNegativeStock(database);
+  const runPreparation = async () => {
+    await ensureDefaults(database);
+    await ensureDocumentIds(database);
+    await normalizeProducts(database);
+    await normalizeStockMovements(database);
+    await ensureIndexes(database);
+    await repairNegativeStock(database);
+  };
+  if (db) {
+    await runPreparation();
+    return database;
+  }
+  if (!global.__inventoryDatabasePreparation) {
+    global.__inventoryDatabasePreparation = runPreparation();
+  }
+  try {
+    await global.__inventoryDatabasePreparation;
+  } catch (error) {
+    global.__inventoryDatabasePreparation = undefined;
+    throw error;
+  }
   return database;
 }
 
@@ -658,24 +925,27 @@ function makeInsertRows(table: string, values: unknown, user: MongoUser | null) 
   const created = nowIso();
   return source.map((value) => {
     const row = { ...(value as DocumentRow) };
+    normalizeSimpleValues(table, row);
     if (table === "allowed_emails" && row.email) {
       row.email = String(row.email).trim().toLowerCase();
     }
-    if (!row.id && table !== "allowed_emails" && table !== "business_settings") {
+    if (table !== "allowed_emails" && table !== "business_settings") {
       row.id = randomUUID();
     }
-    if (!row.created_at) row.created_at = created;
+    row.created_at = created;
     if (table === "products") {
       if (row.sku === null || row.sku === "") delete row.sku;
       if (row.barcode === null || row.barcode === "") delete row.barcode;
       row.is_active = row.is_active ?? true;
-      row.created_by = row.created_by ?? user?.id ?? null;
+      row.created_by = user?.id ?? null;
       row.updated_at = row.updated_at ?? created;
     }
     if (table === "stock_movements") {
-      row.created_by = row.created_by ?? user?.id;
+      row.created_by = user?.id;
       row.location_id = row.location_id ?? null;
     }
+    if (table === "allowed_emails") row.added_by = user?.id ?? null;
+    if (table === "business_settings") row.updated_at = created;
     return row;
   });
 }
@@ -780,7 +1050,15 @@ async function insertRows(db: Db, query: QueryRequest, user: MongoUser | null) {
 async function updateRows(db: Db, query: QueryRequest) {
   const rows = applyFilters(await rowsForTable(db, query.table), query);
   const values = { ...(query.values as DocumentRow) };
+  normalizeSimpleValues(query.table, values);
   const unset: DocumentRow = {};
+  if (query.table === "profiles" && values.role === "staff") {
+    const adminCount = await db.collection("profiles").countDocuments({ role: "admin" });
+    const affectedAdmins = rows.filter((row) => row.role === "admin").length;
+    if (affectedAdmins > 0 && adminCount <= affectedAdmins) {
+      throw new Error("Ochha ma ochho ek admin jaruri che");
+    }
+  }
   if (query.table === "stock_movements") {
     const balanceFields = new Set([
       "batch_id",
@@ -795,6 +1073,12 @@ async function updateRows(db: Db, query: QueryRequest) {
     }
   }
   if (query.table === "products") {
+    if (values.category_id) {
+      const category = await db
+        .collection("categories")
+        .findOne(singleIdFilter(String(values.category_id)));
+      if (!category) throw new Error("Category not found");
+    }
     values.updated_at = values.updated_at ?? nowIso();
     if (values.sku === null || values.sku === "") {
       delete values.sku;
@@ -805,6 +1089,7 @@ async function updateRows(db: Db, query: QueryRequest) {
       unset.barcode = "";
     }
   }
+  if (query.table === "business_settings") values.updated_at = nowIso();
   const ids = rows.map((row) => row.id).filter(Boolean);
   if (ids.length === 0) return [];
   const update: DocumentRow = {};
@@ -831,8 +1116,15 @@ async function deleteRows(db: Db, query: QueryRequest) {
     await db.collection("products").updateMany({ category_id: { $in: ids } }, { $set: { category_id: null } });
   }
   if (query.table === "locations") {
+    if (rows.some((row) => row.is_default === true)) {
+      throw new Error("Default location delete nathi thai shakti");
+    }
     const used = await db.collection("stock_movements").findOne({ location_id: { $in: ids } });
     if (used) throw new Error("violates foreign key");
+  }
+  if (query.table === "suppliers") {
+    const used = await db.collection("purchase_orders").findOne({ supplier_id: { $in: ids } });
+    if (used) throw new Error("Supplier ni purchase history che");
   }
   if (query.table === "allowed_emails") {
     const emails = rows.map((row) => row.email).filter(Boolean);
@@ -848,6 +1140,7 @@ export async function executeMongoQuery<T = unknown>(
   user: MongoUser | null
 ): Promise<QueryResult<T>> {
   try {
+    assertQueryPermission(query, user);
     const db = await prepareDatabase();
     let rows: DocumentRow[];
 
@@ -936,24 +1229,71 @@ export async function executeRpc(
     if (!user) return error("Not authenticated");
     const db = await prepareDatabase();
     if (name === "lookup_barcode") return { data: await lookupBarcode(db, args), error: null };
-    if (name === "record_movement") return { data: await recordMovement(db, args, user), error: null };
-    if (name === "transfer_stock") return { data: await transferStock(db, args, user), error: null };
-    if (name === "create_sale") return { data: await createSale(db, args, user), error: null };
-    if (name === "update_sale") return { data: await updateSale(db, args, user), error: null };
+    if (name === "create_product") {
+      return {
+        data: await serializeStockMutation(() => createProduct(db, args, user)),
+        error: null,
+      };
+    }
+    if (name === "import_products") {
+      return {
+        data: await serializeStockMutation(() => importProducts(db, args, user)),
+        error: null,
+      };
+    }
+    if (name === "record_movement") {
+      return {
+        data: await serializeStockMutation(() => recordMovement(db, args, user)),
+        error: null,
+      };
+    }
+    if (name === "transfer_stock") {
+      return {
+        data: await serializeStockMutation(() => transferStock(db, args, user)),
+        error: null,
+      };
+    }
+    if (name === "set_default_location") {
+      return { data: await setDefaultLocation(db, args, user), error: null };
+    }
+    if (name === "create_sale") {
+      return {
+        data: await serializeStockMutation(() => createSale(db, args, user)),
+        error: null,
+      };
+    }
+    if (name === "update_sale") {
+      return {
+        data: await serializeStockMutation(() => updateSale(db, args, user)),
+        error: null,
+      };
+    }
     if (name === "create_purchase_order") {
-      return { data: await createPurchaseOrder(db, args, user), error: null };
+      return {
+        data: await serializeStockMutation(() => createPurchaseOrder(db, args, user)),
+        error: null,
+      };
     }
     if (name === "update_purchase_order") {
-      return { data: await updatePurchaseOrder(db, args, user), error: null };
+      return {
+        data: await serializeStockMutation(() => updatePurchaseOrder(db, args, user)),
+        error: null,
+      };
     }
     if (name === "receive_purchase_order") {
-      return { data: await receivePurchaseOrder(db, args, user), error: null };
+      return {
+        data: await serializeStockMutation(() => receivePurchaseOrder(db, args, user)),
+        error: null,
+      };
     }
     if (name === "cancel_purchase_order") {
       return { data: await cancelPurchaseOrder(db, args), error: null };
     }
     if (name === "create_sale_return") {
-      return { data: await createSaleReturn(db, args, user), error: null };
+      return {
+        data: await serializeStockMutation(() => createSaleReturn(db, args, user)),
+        error: null,
+      };
     }
     return error(`Unknown RPC: ${name}`);
   } catch (err) {
@@ -970,6 +1310,123 @@ async function lookupBarcode(db: Db, args: DocumentRow) {
   return { found: true, product };
 }
 
+async function createProduct(db: Db, args: DocumentRow, user: MongoUser) {
+  const values = { ...((args.p_product ?? {}) as DocumentRow) };
+  validateMutationFields("products", values);
+  const [product] = makeInsertRows("products", values, user);
+  const openingStock = requireNonNegativeNumber(
+    args.p_opening_stock ?? 0,
+    "Opening stock"
+  );
+  const locationId = args.p_location_id
+    ? String(args.p_location_id)
+    : await getDefaultLocationId(db);
+  const location = await db.collection("locations").findOne({ id: locationId });
+  if (!location) throw new Error("Location not found");
+  if (product.category_id) {
+    const category = await db
+      .collection("categories")
+      .findOne(singleIdFilter(String(product.category_id)));
+    if (!category) throw new Error("Category not found");
+  }
+
+  await db.collection("products").insertOne(product);
+  try {
+    if (openingStock > 0) {
+      await db.collection("stock_movements").insertOne({
+        batch_id: null,
+        created_at: nowIso(),
+        created_by: user.id,
+        id: randomUUID(),
+        location_id: locationId,
+        product_id: product.id,
+        quantity: openingStock,
+        reason: "Opening stock",
+        supplier_id: null,
+        type: "in",
+      });
+    }
+  } catch (error) {
+    await db.collection("products").deleteOne({ id: product.id });
+    throw error;
+  }
+  return publicRow(product);
+}
+
+async function importProducts(db: Db, args: DocumentRow, user: MongoUser) {
+  const sources = Array.isArray(args.p_products) ? args.p_products : [];
+  if (sources.length === 0) throw new Error("Import ma ochha ma ochho 1 product joie");
+  if (sources.length > 100) throw new Error("Ek vakhat ma vadhu ma vadhu 100 products import karo");
+  const locationId = args.p_location_id
+    ? String(args.p_location_id)
+    : await getDefaultLocationId(db);
+  const location = await db.collection("locations").findOne({ id: locationId });
+  if (!location) throw new Error("Location not found");
+
+  const products: DocumentRow[] = [];
+  const movements: DocumentRow[] = [];
+  const seenBarcodes = new Set<string>();
+  const seenSkus = new Set<string>();
+
+  for (const source of sources) {
+    if (!source || typeof source !== "object") throw new Error("Invalid product row");
+    const values = { ...(source as DocumentRow) };
+    const openingStock = requireNonNegativeNumber(
+      values.opening_stock ?? 0,
+      "Opening stock"
+    );
+    delete values.opening_stock;
+    validateMutationFields("products", values);
+    const [product] = makeInsertRows("products", values, user);
+    const barcode = product.barcode ? String(product.barcode) : "";
+    const sku = product.sku ? String(product.sku) : "";
+    if (barcode && seenBarcodes.has(barcode)) throw new Error("Import ma duplicate barcode che");
+    if (sku && seenSkus.has(sku)) throw new Error("Import ma duplicate SKU che");
+    if (barcode) seenBarcodes.add(barcode);
+    if (sku) seenSkus.add(sku);
+    products.push(product);
+    if (openingStock > 0) {
+      movements.push({
+        batch_id: null,
+        created_at: nowIso(),
+        created_by: user.id,
+        id: randomUUID(),
+        location_id: locationId,
+        product_id: product.id,
+        quantity: openingStock,
+        reason: "Opening stock (import)",
+        supplier_id: null,
+        type: "in",
+      });
+    }
+  }
+
+  const productIds = products.map((product) => product.id);
+  const categoryIds = [
+    ...new Set(products.map((product) => product.category_id).filter(Boolean).map(String)),
+  ];
+  if (categoryIds.length > 0) {
+    const categoryCount = await db
+      .collection("categories")
+      .countDocuments(idFilter(categoryIds));
+    if (categoryCount !== categoryIds.length) throw new Error("Category not found");
+  }
+  try {
+    await db.collection("products").insertMany(products);
+    if (movements.length > 0) {
+      await db.collection("stock_movements").insertMany(movements);
+    }
+  } catch (error) {
+    await Promise.all([
+      db.collection("stock_movements").deleteMany({ product_id: { $in: productIds } }),
+      db.collection("products").deleteMany({ id: { $in: productIds } }),
+    ]);
+    throw error;
+  }
+
+  return { imported: products.length, products: products.map(publicRow) };
+}
+
 async function recordMovement(db: Db, args: DocumentRow, user: MongoUser) {
   const productId = String(args.p_product_id ?? "");
   const type = String(args.p_type ?? "");
@@ -982,6 +1439,8 @@ async function recordMovement(db: Db, args: DocumentRow, user: MongoUser) {
   const product = await db.collection("products").findOne(singleIdFilter(productId));
   if (!product) throw new Error("Product not found");
   const locationId = args.p_location_id ? String(args.p_location_id) : await getDefaultLocationId(db);
+  const location = await db.collection("locations").findOne({ id: locationId });
+  if (!location) throw new Error("Location not found");
   const batchId = await resolveBatch(
     db,
     productId,
@@ -1037,41 +1496,70 @@ async function transferStock(db: Db, args: DocumentRow, user: MongoUser) {
   if (available < quantity) throw new Error(`${from.name} par stock ochho che (available: ${available})`);
   const transferId = randomUUID();
   const created_at = nowIso();
-  await db.collection("stock_movements").insertMany([
+  try {
+    await db.collection("stock_movements").insertMany([
+      {
+        batch_id: batchId,
+        created_at,
+        created_by: user.id,
+        id: randomUUID(),
+        location_id: fromId,
+        product_id: productId,
+        quantity,
+        reason: `Transfer -> ${to.name}`,
+        transfer_id: transferId,
+        type: "out",
+      },
+      {
+        batch_id: batchId,
+        created_at,
+        created_by: user.id,
+        id: randomUUID(),
+        location_id: toId,
+        product_id: productId,
+        quantity,
+        reason: `Transfer <- ${from.name}`,
+        transfer_id: transferId,
+        type: "in",
+      },
+    ]);
+  } catch (error) {
+    await db.collection("stock_movements").deleteMany({ transfer_id: transferId });
+    throw error;
+  }
+  return { transfer_id: transferId };
+}
+
+async function setDefaultLocation(db: Db, args: DocumentRow, user: MongoUser) {
+  if (user.role !== "admin") throw new Error("Aa action mate admin role joie");
+  const locationId = String(args.p_location_id ?? "");
+  const location = await db.collection("locations").findOne({ id: locationId });
+  if (!location) throw new Error("Location not found");
+  await db.collection("locations").bulkWrite([
     {
-      batch_id: batchId,
-      created_at,
-      created_by: user.id,
-      id: randomUUID(),
-      location_id: fromId,
-      product_id: productId,
-      quantity,
-      reason: `Transfer -> ${to.name}`,
-      transfer_id: transferId,
-      type: "out",
+      updateMany: {
+        filter: { is_default: true, id: { $ne: locationId } },
+        update: { $set: { is_default: false } },
+      },
     },
     {
-      batch_id: batchId,
-      created_at,
-      created_by: user.id,
-      id: randomUUID(),
-      location_id: toId,
-      product_id: productId,
-      quantity,
-      reason: `Transfer <- ${from.name}`,
-      transfer_id: transferId,
-      type: "in",
+      updateOne: {
+        filter: { id: locationId },
+        update: { $set: { is_default: true } },
+      },
     },
   ]);
-  return { transfer_id: transferId };
+  return { location_id: locationId };
 }
 
 async function createSale(db: Db, args: DocumentRow, user: MongoUser) {
   const items = Array.isArray(args.p_items) ? args.p_items : [];
   if (items.length === 0) throw new Error("Sale ma ochha ma ochhi 1 item joie");
-  const discount = toNumber(args.p_discount);
-  if (discount < 0) throw new Error("Discount negative na hoi shake");
+  assertUniqueValues(items, "product_id", "Sale product");
+  const discount = requireNonNegativeNumber(args.p_discount ?? 0, "Discount");
   const locationId = args.p_location_id ? String(args.p_location_id) : await getDefaultLocationId(db);
+  const location = await db.collection("locations").findOne({ id: locationId });
+  if (!location) throw new Error("Location not found");
   const products = await db
     .collection("products")
     .find(idFilter(items.map((item) => String(item.product_id ?? ""))))
@@ -1080,8 +1568,8 @@ async function createSale(db: Db, args: DocumentRow, user: MongoUser) {
 
   for (const item of items) {
     const product = productMap.get(String(item.product_id));
-    const quantity = toNumber(item.quantity);
-    const price = toNumber(item.price);
+    const quantity = finiteNumber(item.quantity, "Quantity");
+    const price = requireNonNegativeNumber(item.price, "Price");
     if (!product) throw new Error("Product not found");
     if (quantity <= 0) throw new Error("Quantity 0 thi vadhare hovi joie");
     if (price < 0) throw new Error("Price valid nathi");
@@ -1108,7 +1596,7 @@ async function createSale(db: Db, args: DocumentRow, user: MongoUser) {
   const invoiceNo = await nextCode(db, "invoice", settings?.invoice_prefix || "INV");
   const saleId = randomUUID();
   const created_at = nowIso();
-  await db.collection("sales").insertOne({
+  const saleRow = {
     created_at,
     created_by: user.id,
     customer_id: args.p_customer_id ?? null,
@@ -1116,16 +1604,18 @@ async function createSale(db: Db, args: DocumentRow, user: MongoUser) {
     grand_total: grandTotal,
     id: saleId,
     invoice_no: invoiceNo,
+    location_id: locationId,
     note: args.p_note ?? null,
     paid_amount: paidAmount,
     payment_method: args.p_payment_method ?? "cash",
     status,
     subtotal: round2(subtotal),
     tax_total: round2(taxTotal),
-  });
+  };
 
   const saleItems: DocumentRow[] = [];
   const movements: DocumentRow[] = [];
+  const availableBatches = await batchStockRows(db);
   for (const item of items) {
     const product = productMap.get(String(item.product_id))!;
     const quantity = toNumber(item.quantity);
@@ -1147,7 +1637,7 @@ async function createSale(db: Db, args: DocumentRow, user: MongoUser) {
     });
 
     let remaining = quantity;
-    const batchRows = (await batchStockRows(db))
+    const batchRows = availableBatches
       .filter(
         (row) =>
           row.product_id === productId &&
@@ -1186,8 +1676,18 @@ async function createSale(db: Db, args: DocumentRow, user: MongoUser) {
       });
     }
   }
-  if (saleItems.length) await db.collection("sale_items").insertMany(saleItems);
-  if (movements.length) await db.collection("stock_movements").insertMany(movements);
+  try {
+    await db.collection("sales").insertOne(saleRow);
+    if (saleItems.length) await db.collection("sale_items").insertMany(saleItems);
+    if (movements.length) await db.collection("stock_movements").insertMany(movements);
+  } catch (error) {
+    await Promise.all([
+      db.collection("sale_items").deleteMany({ sale_id: saleId }),
+      db.collection("stock_movements").deleteMany({ sale_id: saleId }),
+      db.collection("sales").deleteOne({ id: saleId }),
+    ]);
+    throw error;
+  }
   return { grand_total: grandTotal, invoice_no: invoiceNo, sale_id: saleId };
 }
 
@@ -1201,13 +1701,18 @@ async function updateSale(db: Db, args: DocumentRow, user: MongoUser) {
   }
   const items = Array.isArray(args.p_items) ? args.p_items : [];
   if (items.length === 0) throw new Error("Sale ma ochha ma ochhi 1 item joie");
-  const discount = toNumber(args.p_discount);
-  if (discount < 0) throw new Error("Discount negative na hoi shake");
-  const oldMovements = await db.collection("stock_movements").find({ sale_id: saleId }).toArray();
+  assertUniqueValues(items, "product_id", "Sale product");
+  const discount = requireNonNegativeNumber(args.p_discount ?? 0, "Discount");
+  const [oldMovements, oldSaleItems] = await Promise.all([
+    db.collection("stock_movements").find({ sale_id: saleId }).toArray(),
+    db.collection("sale_items").find({ sale_id: saleId }).toArray(),
+  ]);
   const locationId =
     args.p_location_id ? String(args.p_location_id) :
     oldMovements[0]?.location_id ? String(oldMovements[0].location_id) :
     await getDefaultLocationId(db);
+  const location = await db.collection("locations").findOne({ id: locationId });
+  if (!location) throw new Error("Location not found");
   const products = await db
     .collection("products")
     .find(idFilter(items.map((item) => String(item.product_id ?? ""))))
@@ -1223,8 +1728,8 @@ async function updateSale(db: Db, args: DocumentRow, user: MongoUser) {
   for (const item of items) {
     const productId = String(item.product_id ?? "");
     const product = productMap.get(productId);
-    const quantity = toNumber(item.quantity);
-    const price = toNumber(item.price);
+    const quantity = finiteNumber(item.quantity, "Quantity");
+    const price = requireNonNegativeNumber(item.price, "Price");
     if (!product) throw new Error("Product not found");
     if (quantity <= 0) throw new Error("Quantity 0 thi vadhare hovi joie");
     if (price < 0) throw new Error("Price valid nathi");
@@ -1238,6 +1743,13 @@ async function updateSale(db: Db, args: DocumentRow, user: MongoUser) {
   let taxTotal = 0;
   const saleItems: DocumentRow[] = [];
   const movements: DocumentRow[] = [];
+  const currentBatchRows = await batchStockRows(db);
+  const oldBatchOut = new Map<string, number>();
+  for (const movement of oldMovements) {
+    if (!movement.batch_id || String(movement.location_id) !== locationId) continue;
+    const key = `${movement.product_id}\u0000${movement.batch_id}`;
+    oldBatchOut.set(key, (oldBatchOut.get(key) ?? 0) + toNumber(movement.quantity));
+  }
   const updated_at = nowIso();
 
   for (const item of items) {
@@ -1261,17 +1773,56 @@ async function updateSale(db: Db, args: DocumentRow, user: MongoUser) {
       sale_id: saleId,
       unit: product.unit,
     });
-    movements.push({
-      created_at: updated_at,
-      created_by: user.id,
-      id: randomUUID(),
-      location_id: locationId,
-      product_id: productId,
-      quantity,
-      reason: `Edited sale ${sale.invoice_no}`,
-      sale_id: saleId,
-      type: "out",
-    });
+    let remaining = quantity;
+    const batchRows: DocumentRow[] = currentBatchRows
+      .filter(
+        (row) =>
+          row.product_id === productId &&
+          row.location_id === locationId
+      )
+      .map((row): DocumentRow => ({
+        ...row,
+        stock:
+          toNumber(row.stock) +
+          (oldBatchOut.get(`${productId}\u0000${row.batch_id}`) ?? 0),
+      }))
+      .filter((row) => toNumber(row.stock) > 0)
+      .sort((left, right) =>
+        String(left.expiry_date ?? "9999").localeCompare(
+          String(right.expiry_date ?? "9999")
+        )
+      );
+    for (const batch of batchRows) {
+      if (remaining <= 0) break;
+      const take = Math.min(remaining, toNumber(batch.stock));
+      movements.push({
+        batch_id: batch.batch_id,
+        created_at: updated_at,
+        created_by: user.id,
+        id: randomUUID(),
+        location_id: locationId,
+        product_id: productId,
+        quantity: take,
+        reason: `Edited sale ${sale.invoice_no}`,
+        sale_id: saleId,
+        type: "out",
+      });
+      remaining -= take;
+    }
+    if (remaining > 0) {
+      movements.push({
+        batch_id: null,
+        created_at: updated_at,
+        created_by: user.id,
+        id: randomUUID(),
+        location_id: locationId,
+        product_id: productId,
+        quantity: remaining,
+        reason: `Edited sale ${sale.invoice_no}`,
+        sale_id: saleId,
+        type: "out",
+      });
+    }
   }
 
   const grandTotal = round2(subtotal + taxTotal - discount);
@@ -1280,17 +1831,19 @@ async function updateSale(db: Db, args: DocumentRow, user: MongoUser) {
   paidAmount = Math.max(0, Math.min(paidAmount, grandTotal));
   const status = paidAmount >= grandTotal ? "paid" : paidAmount === 0 ? "unpaid" : "partial";
 
-  await db.collection("sale_items").deleteMany({ sale_id: saleId });
-  await db.collection("stock_movements").deleteMany({ sale_id: saleId });
-  if (saleItems.length) await db.collection("sale_items").insertMany(saleItems);
-  if (movements.length) await db.collection("stock_movements").insertMany(movements);
-  await db.collection("sales").updateOne(
-    { id: saleId },
-    {
-      $set: {
+  try {
+    await db.collection("sale_items").deleteMany({ sale_id: saleId });
+    await db.collection("stock_movements").deleteMany({ sale_id: saleId });
+    if (saleItems.length) await db.collection("sale_items").insertMany(saleItems);
+    if (movements.length) await db.collection("stock_movements").insertMany(movements);
+    await db.collection("sales").updateOne(
+      { id: saleId },
+      {
+        $set: {
         customer_id: args.p_customer_id ?? null,
         discount,
         grand_total: grandTotal,
+        location_id: locationId,
         note: args.p_note ?? null,
         paid_amount: paidAmount,
         payment_method: args.p_payment_method ?? sale.payment_method ?? "cash",
@@ -1299,15 +1852,34 @@ async function updateSale(db: Db, args: DocumentRow, user: MongoUser) {
         tax_total: round2(taxTotal),
         updated_at,
         updated_by: user.id,
-      },
-    }
-  );
+        },
+      }
+    );
+  } catch (error) {
+    await Promise.all([
+      db.collection("sale_items").deleteMany({ sale_id: saleId }),
+      db.collection("stock_movements").deleteMany({ sale_id: saleId }),
+    ]);
+    if (oldSaleItems.length) await db.collection("sale_items").insertMany(oldSaleItems);
+    if (oldMovements.length) await db.collection("stock_movements").insertMany(oldMovements);
+    await db.collection("sales").replaceOne({ id: saleId }, sale);
+    throw error;
+  }
   return { grand_total: grandTotal, sale_id: saleId };
 }
 
 async function createPurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
   const items = Array.isArray(args.p_items) ? args.p_items : [];
   if (items.length === 0) throw new Error("PO ma ochha ma ochhi 1 item joie");
+  assertUniqueValues(items, "product_id", "Purchase product");
+  const receiveNow = args.p_receive_now === true;
+  const locationId = args.p_location_id
+    ? String(args.p_location_id)
+    : await getDefaultLocationId(db);
+  if (receiveNow) {
+    const location = await db.collection("locations").findOne({ id: locationId });
+    if (!location) throw new Error("Location not found");
+  }
   const products = await db
     .collection("products")
     .find(idFilter(items.map((item) => String(item.product_id ?? ""))))
@@ -1319,8 +1891,8 @@ async function createPurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
   let total = 0;
   const poItems = items.map((item) => {
     const product = productMap.get(String(item.product_id));
-    const quantity = toNumber(item.quantity);
-    const cost = toNumber(item.cost);
+    const quantity = finiteNumber(item.quantity, "Quantity");
+    const cost = requireNonNegativeNumber(item.cost, "Cost");
     if (!product) throw new Error("Product not found");
     if (quantity <= 0) throw new Error("Quantity 0 thi vadhare hovi joie");
     if (cost < 0) throw new Error("Cost valid nathi");
@@ -1338,19 +1910,53 @@ async function createPurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
     };
   });
   total = round2(total);
-  await db.collection("purchase_orders").insertOne({
+  const receivedAt = receiveNow ? nowIso() : null;
+  const purchaseRow = {
     created_at,
     created_by: user.id,
     id: poId,
+    location_id: receiveNow ? locationId : null,
     note: args.p_note ?? null,
     po_no: poNo,
-    received_at: null,
-    status: "ordered",
+    received_at: receivedAt,
+    status: receiveNow ? "received" : "ordered",
     supplier_id: args.p_supplier_id ?? null,
     total,
-  });
-  await db.collection("purchase_order_items").insertMany(poItems);
-  return { po_id: poId, po_no: poNo, total };
+  };
+  const movements = receiveNow
+    ? poItems.map((item) => ({
+        created_at: receivedAt,
+        created_by: user.id,
+        id: randomUUID(),
+        location_id: locationId,
+        po_id: poId,
+        product_id: item.product_id,
+        quantity: item.quantity,
+        reason: `PO ${poNo}`,
+        supplier_id: args.p_supplier_id ?? null,
+        type: "in",
+      }))
+    : [];
+  try {
+    await db.collection("purchase_orders").insertOne(purchaseRow);
+    await db.collection("purchase_order_items").insertMany(poItems);
+    if (movements.length) {
+      await db.collection("stock_movements").insertMany(movements);
+    }
+  } catch (error) {
+    await Promise.all([
+      db.collection("purchase_order_items").deleteMany({ po_id: poId }),
+      db.collection("stock_movements").deleteMany({ po_id: poId }),
+      db.collection("purchase_orders").deleteOne({ id: poId }),
+    ]);
+    throw error;
+  }
+  return {
+    po_id: poId,
+    po_no: poNo,
+    status: receiveNow ? "received" : "ordered",
+    total,
+  };
 }
 
 async function updatePurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
@@ -1360,11 +1966,31 @@ async function updatePurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
   if (po.status === "cancelled") throw new Error("Cancelled PO edit nathi thai shaktu");
   const items = Array.isArray(args.p_items) ? args.p_items : [];
   if (items.length === 0) throw new Error("PO ma ochha ma ochhi 1 item joie");
-  const oldMovements = await db.collection("stock_movements").find({ po_id: poId }).toArray();
+  assertUniqueValues(items, "product_id", "Purchase product");
+  const [oldMovements, oldItems] = await Promise.all([
+    db.collection("stock_movements").find({ po_id: poId }).toArray(),
+    db.collection("purchase_order_items").find({ po_id: poId }).toArray(),
+  ]);
+  const originalLocationId = oldMovements[0]?.location_id
+    ? String(oldMovements[0].location_id)
+    : po.location_id
+      ? String(po.location_id)
+      : null;
+  if (
+    po.status === "received" &&
+    originalLocationId &&
+    args.p_location_id &&
+    String(args.p_location_id) !== originalLocationId
+  ) {
+    throw new Error("Received PO ni stock location badli nathi shakati");
+  }
   const locationId =
-    args.p_location_id ? String(args.p_location_id) :
-    oldMovements[0]?.location_id ? String(oldMovements[0].location_id) :
-    await getDefaultLocationId(db);
+    originalLocationId ??
+    (args.p_location_id
+      ? String(args.p_location_id)
+      : await getDefaultLocationId(db));
+  const location = await db.collection("locations").findOne({ id: locationId });
+  if (!location) throw new Error("Location not found");
   const products = await db
     .collection("products")
     .find(idFilter(items.map((item) => String(item.product_id ?? ""))))
@@ -1391,8 +2017,8 @@ async function updatePurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
   for (const item of items) {
     const productId = String(item.product_id ?? "");
     const product = productMap.get(productId);
-    const quantity = toNumber(item.quantity);
-    const cost = toNumber(item.cost);
+    const quantity = finiteNumber(item.quantity, "Quantity");
+    const cost = requireNonNegativeNumber(item.cost, "Cost");
     if (!product) throw new Error("Product not found");
     if (quantity <= 0) throw new Error("Quantity 0 thi vadhare hovi joie");
     if (cost < 0) throw new Error("Cost valid nathi");
@@ -1411,14 +2037,10 @@ async function updatePurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
   }
   total = round2(total);
 
-  await db.collection("purchase_order_items").deleteMany({ po_id: poId });
-  await db.collection("purchase_order_items").insertMany(poItems);
-  await db.collection("stock_movements").deleteMany({ po_id: poId });
-  if (po.status === "received") {
-    const created_at = nowIso();
-    const movements = poItems
-      .filter((item) => item.product_id)
-      .map((item) => ({
+  const created_at = nowIso();
+  const movements =
+    po.status === "received"
+      ? poItems.filter((item) => item.product_id).map((item) => ({
         created_at,
         created_by: user.id,
         id: randomUUID(),
@@ -1429,21 +2051,36 @@ async function updatePurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
         reason: `Edited PO ${po.po_no}`,
         supplier_id: args.p_supplier_id ?? po.supplier_id ?? null,
         type: "in",
-      }));
+      }))
+      : [];
+  try {
+    await db.collection("purchase_order_items").deleteMany({ po_id: poId });
+    await db.collection("stock_movements").deleteMany({ po_id: poId });
+    await db.collection("purchase_order_items").insertMany(poItems);
     if (movements.length) await db.collection("stock_movements").insertMany(movements);
-  }
-  await db.collection("purchase_orders").updateOne(
-    { id: poId },
-    {
-      $set: {
+    await db.collection("purchase_orders").updateOne(
+      { id: poId },
+      {
+        $set: {
         note: args.p_note ?? null,
+        location_id: po.status === "received" ? locationId : (po.location_id ?? null),
         supplier_id: args.p_supplier_id ?? null,
         total,
         updated_at: nowIso(),
         updated_by: user.id,
-      },
-    }
-  );
+        },
+      }
+    );
+  } catch (error) {
+    await Promise.all([
+      db.collection("purchase_order_items").deleteMany({ po_id: poId }),
+      db.collection("stock_movements").deleteMany({ po_id: poId }),
+    ]);
+    if (oldItems.length) await db.collection("purchase_order_items").insertMany(oldItems);
+    if (oldMovements.length) await db.collection("stock_movements").insertMany(oldMovements);
+    await db.collection("purchase_orders").replaceOne({ id: poId }, po);
+    throw error;
+  }
   return { po_id: poId, total };
 }
 
@@ -1453,8 +2090,11 @@ async function receivePurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) 
   if (!po) throw new Error("PO not found");
   if (po.status !== "ordered") throw new Error(`PO already ${po.status} che`);
   const locationId = args.p_location_id ? String(args.p_location_id) : await getDefaultLocationId(db);
+  const location = await db.collection("locations").findOne({ id: locationId });
+  if (!location) throw new Error("Location not found");
   const items = await db.collection("purchase_order_items").find({ po_id: poId }).toArray();
   const created_at = nowIso();
+  const receiptId = randomUUID();
   const movements = items
     .filter((item) => item.product_id)
     .map((item) => ({
@@ -1465,15 +2105,22 @@ async function receivePurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) 
       po_id: poId,
       product_id: item.product_id,
       quantity: toNumber(item.quantity),
+      receipt_id: receiptId,
       reason: `PO ${po.po_no}`,
       supplier_id: po.supplier_id ?? null,
       type: "in",
     }));
-  if (movements.length) await db.collection("stock_movements").insertMany(movements);
-  await db.collection("purchase_orders").updateOne(
-    { id: poId },
-    { $set: { received_at: nowIso(), status: "received" } }
-  );
+  try {
+    if (movements.length) await db.collection("stock_movements").insertMany(movements);
+    const update = await db.collection("purchase_orders").updateOne(
+      { id: poId, status: "ordered" },
+      { $set: { location_id: locationId, received_at: nowIso(), status: "received" } }
+    );
+    if (update.modifiedCount !== 1) throw new Error("PO status badlai gayu che");
+  } catch (error) {
+    await db.collection("stock_movements").deleteMany({ receipt_id: receiptId });
+    throw error;
+  }
   return { po_id: poId, status: "received" };
 }
 
@@ -1494,7 +2141,17 @@ async function createSaleReturn(db: Db, args: DocumentRow, user: MongoUser) {
   if (!sale) throw new Error("Sale not found");
   const items = Array.isArray(args.p_items) ? args.p_items : [];
   if (items.length === 0) throw new Error("Return ma ochha ma ochhi 1 item joie");
-  const locationId = args.p_location_id ? String(args.p_location_id) : await getDefaultLocationId(db);
+  assertUniqueValues(items, "sale_item_id", "Return item");
+  const saleMovement = await db.collection("stock_movements").findOne({ sale_id: saleId, type: "out" });
+  const locationId = args.p_location_id
+    ? String(args.p_location_id)
+    : sale.location_id
+      ? String(sale.location_id)
+      : saleMovement?.location_id
+        ? String(saleMovement.location_id)
+        : await getDefaultLocationId(db);
+  const location = await db.collection("locations").findOne({ id: locationId });
+  if (!location) throw new Error("Location not found");
   const saleItemIds = items.map((item) => item.sale_item_id);
   const saleItems = await db
     .collection("sale_items")
@@ -1516,7 +2173,7 @@ async function createSaleReturn(db: Db, args: DocumentRow, user: MongoUser) {
   for (const item of items) {
     const saleItem = saleItemMap.get(String(item.sale_item_id));
     if (!saleItem) throw new Error("Sale item not found");
-    const quantity = toNumber(item.quantity);
+    const quantity = finiteNumber(item.quantity, "Quantity");
     const already = returnedMap.get(String(item.sale_item_id)) ?? 0;
     const max = toNumber(saleItem.quantity) - already;
     if (quantity <= 0) throw new Error("Quantity 0 thi vadhare hovi joie");
@@ -1527,6 +2184,8 @@ async function createSaleReturn(db: Db, args: DocumentRow, user: MongoUser) {
     subtotal += line;
     taxTotal += round2((line * toNumber(saleItem.gst_rate)) / 100);
     returnItems.push({
+      cost: saleItem.cost == null ? null : toNumber(saleItem.cost),
+      created_at,
       gst_rate: toNumber(saleItem.gst_rate),
       id: randomUUID(),
       line_total: line,
@@ -1552,19 +2211,46 @@ async function createSaleReturn(db: Db, args: DocumentRow, user: MongoUser) {
       });
     }
   }
-  const total = round2(subtotal + taxTotal);
-  await db.collection("sale_returns").insertOne({
+  const grossTotal = round2(subtotal + taxTotal);
+  const saleGrossTotal = round2(toNumber(sale.subtotal) + toNumber(sale.tax_total));
+  const proportionalDiscount =
+    saleGrossTotal > 0
+      ? round2((grossTotal * toNumber(sale.discount)) / saleGrossTotal)
+      : 0;
+  const previousReturns = await db
+    .collection("sale_returns")
+    .find({ sale_id: saleId })
+    .toArray();
+  const previouslyRefunded = round2(
+    previousReturns.reduce((sum, previousReturn) => sum + toNumber(previousReturn.total), 0)
+  );
+  const refundableBalance = Math.max(0, round2(toNumber(sale.grand_total) - previouslyRefunded));
+  const total = Math.min(round2(grossTotal - proportionalDiscount), refundableBalance);
+  const returnDiscount = round2(grossTotal - total);
+  const returnRow = {
     created_at,
     created_by: user.id,
+    discount: returnDiscount,
     id: returnId,
+    location_id: locationId,
     reason: args.p_reason ?? null,
     return_no: returnNo,
     sale_id: saleId,
     subtotal: round2(subtotal),
     tax_total: round2(taxTotal),
     total,
-  });
-  if (returnItems.length) await db.collection("sale_return_items").insertMany(returnItems);
-  if (movements.length) await db.collection("stock_movements").insertMany(movements);
+  };
+  try {
+    await db.collection("sale_returns").insertOne(returnRow);
+    if (returnItems.length) await db.collection("sale_return_items").insertMany(returnItems);
+    if (movements.length) await db.collection("stock_movements").insertMany(movements);
+  } catch (error) {
+    await Promise.all([
+      db.collection("sale_return_items").deleteMany({ return_id: returnId }),
+      db.collection("stock_movements").deleteMany({ return_id: returnId }),
+      db.collection("sale_returns").deleteOne({ id: returnId }),
+    ]);
+    throw error;
+  }
   return { return_id: returnId, return_no: returnNo, total };
 }

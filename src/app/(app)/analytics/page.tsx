@@ -2,10 +2,14 @@
 
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/mongodb/client";
+import { indiaDaysAgoStartIso } from "@/lib/date";
+import { LoadingState, PageHeader } from "@/components/DashboardUI";
 
 interface SaleLite {
   created_at: string;
+  discount: number;
   grand_total: number;
+  subtotal: number;
   tax_total: number;
   payment_method: string;
 }
@@ -18,6 +22,23 @@ interface ItemLite {
   cost: number | null;
 }
 
+interface ReturnLite {
+  created_at: string;
+  discount?: number;
+  id: string;
+  subtotal: number;
+  tax_total: number;
+  total: number;
+}
+
+interface ReturnItemLite {
+  cost: number | null;
+  line_total: number;
+  product_id: string | null;
+  product_name: string;
+  quantity: number;
+}
+
 const DAYS = 30;
 
 export default function AnalyticsPage() {
@@ -25,26 +46,22 @@ export default function AnalyticsPage() {
   const [sales, setSales] = useState<SaleLite[]>([]);
   const [items, setItems] = useState<ItemLite[]>([]);
   const [returnsTotal, setReturnsTotal] = useState(0);
+  const [returnRows, setReturnRows] = useState<ReturnLite[]>([]);
+  const [returnItems, setReturnItems] = useState<ReturnItemLite[]>([]);
   const [costFallback, setCostFallback] = useState<Map<string, number>>(
     new Map()
   );
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
-      const from = new Date();
-      from.setDate(from.getDate() - (DAYS - 1));
-      const fromIso = from.toISOString().slice(0, 10);
+      const fromIso = indiaDaysAgoStartIso(DAYS - 1);
 
-      const [
-        { data: s },
-        { data: it },
-        { data: rets },
-        { data: prods },
-      ] = await Promise.all([
+      const [salesResult, itemResult, returnResult, productResult] = await Promise.all([
         supabase
           .from("sales")
-          .select("created_at, grand_total, tax_total, payment_method")
+          .select("created_at, discount, grand_total, subtotal, tax_total, payment_method")
           .gte("created_at", fromIso)
           .limit(5000),
         supabase
@@ -54,22 +71,45 @@ export default function AnalyticsPage() {
           .limit(5000),
         supabase
           .from("sale_returns")
-          .select("total")
+          .select("id, created_at, discount, subtotal, tax_total, total")
           .gte("created_at", fromIso),
         supabase.from("products").select("id, purchase_price"),
       ]);
 
-      setSales((s ?? []) as SaleLite[]);
-      setItems((it ?? []) as ItemLite[]);
+      const returns = (returnResult.data ?? []) as ReturnLite[];
+      const returnItemResult =
+        returns.length > 0
+          ? await supabase
+              .from("sale_return_items")
+              .select("cost, line_total, product_id, product_name, quantity")
+              .in("return_id", returns.map((returnRow) => returnRow.id))
+          : { data: [], error: null };
+
+      const loadError =
+        salesResult.error ??
+        itemResult.error ??
+        returnResult.error ??
+        productResult.error ??
+        returnItemResult.error;
+      if (loadError) {
+        setError(loadError.message);
+        setLoading(false);
+        return;
+      }
+
+      setSales((salesResult.data ?? []) as SaleLite[]);
+      setItems((itemResult.data ?? []) as ItemLite[]);
+      setReturnRows(returns);
+      setReturnItems((returnItemResult.data ?? []) as ReturnItemLite[]);
       setReturnsTotal(
-        ((rets ?? []) as { total: number }[]).reduce(
+        returns.reduce(
           (sum, r) => sum + Number(r.total),
           0
         )
       );
       setCostFallback(
         new Map(
-          ((prods ?? []) as { id: string; purchase_price: number }[]).map((p) => [
+          ((productResult.data ?? []) as { id: string; purchase_price: number }[]).map((p) => [
             p.id,
             Number(p.purchase_price),
           ])
@@ -82,21 +122,42 @@ export default function AnalyticsPage() {
   }, []);
 
   // ---------- COMPUTATIONS ----------
-  const revenue = sales.reduce((s, r) => s + Number(r.grand_total), 0);
-  const gst = sales.reduce((s, r) => s + Number(r.tax_total), 0);
+  const grossSales = sales.reduce((sum, sale) => sum + Number(sale.grand_total), 0);
+  const revenue = grossSales - returnsTotal;
+  const gst =
+    sales.reduce((sum, sale) => sum + Number(sale.tax_total), 0) -
+    returnRows.reduce((sum, returnRow) => sum + Number(returnRow.tax_total), 0);
   const invoiceCount = sales.length;
   const avgBill = invoiceCount > 0 ? revenue / invoiceCount : 0;
 
-  // Profit: cost snapshot hoy to e, nahi to aajno purchase price
-  const profit = items.reduce((s, it) => {
+  const soldCost = items.reduce((sum, item) => {
     const cost =
-      it.cost !== null
-        ? Number(it.cost)
-        : it.product_id
-          ? (costFallback.get(it.product_id) ?? 0)
+      item.cost !== null
+        ? Number(item.cost)
+        : item.product_id
+          ? (costFallback.get(item.product_id) ?? 0)
           : 0;
-    return s + Number(it.line_total) - Number(it.quantity) * cost;
+    return sum + Number(item.quantity) * cost;
   }, 0);
+  const returnedCost = returnItems.reduce((sum, item) => {
+    const cost =
+      item.cost !== null
+        ? Number(item.cost)
+        : item.product_id
+          ? (costFallback.get(item.product_id) ?? 0)
+          : 0;
+    return sum + Number(item.quantity) * cost;
+  }, 0);
+  const netSalesBeforeTax = sales.reduce(
+    (sum, sale) => sum + Number(sale.subtotal) - Number(sale.discount),
+    0
+  );
+  const netReturnsBeforeTax = returnRows.reduce(
+    (sum, returnRow) =>
+      sum + Number(returnRow.subtotal) - Number(returnRow.discount ?? 0),
+    0
+  );
+  const profit = netSalesBeforeTax - netReturnsBeforeTax - soldCost + returnedCost;
 
   // Daily revenue — chhella 30 divas
   const days: { label: string; total: number }[] = [];
@@ -122,6 +183,10 @@ export default function AnalyticsPage() {
     const idx = dayIndex(s.created_at);
     if (idx >= 0 && idx < DAYS) days[idx].total += Number(s.grand_total);
   }
+  for (const returnRow of returnRows) {
+    const idx = dayIndex(returnRow.created_at);
+    if (idx >= 0 && idx < DAYS) days[idx].total -= Number(returnRow.total);
+  }
   const maxDay = Math.max(1, ...days.map((d) => d.total));
 
   // Payment split
@@ -141,7 +206,14 @@ export default function AnalyticsPage() {
     cur.revenue += Number(it.line_total);
     prodAgg.set(it.product_name, cur);
   }
+  for (const item of returnItems) {
+    const current = prodAgg.get(item.product_name) ?? { qty: 0, revenue: 0 };
+    current.qty -= Number(item.quantity);
+    current.revenue -= Number(item.line_total);
+    prodAgg.set(item.product_name, current);
+  }
   const topProducts = [...prodAgg.entries()]
+    .filter(([, value]) => value.revenue > 0)
     .sort((a, b) => b[1].revenue - a[1].revenue)
     .slice(0, 10);
   const maxProdRevenue = Math.max(1, ...topProducts.map(([, v]) => v.revenue));
@@ -165,20 +237,31 @@ export default function AnalyticsPage() {
   ];
 
   if (loading)
-    return <p className="py-8 text-center text-sm text-stone-500">Loading...</p>;
+    return (
+      <div className="rounded-lg border border-stone-200 bg-white">
+        <LoadingState label="Loading analytics" />
+      </div>
+    );
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-stone-900">
-        Analytics — last {DAYS} days
-      </h1>
+      <PageHeader
+        title="Analytics"
+        description={`Revenue, profit, payments, and product performance for the last ${DAYS} days`}
+      />
+
+      {error && (
+        <p role="alert" className="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {error}
+        </p>
+      )}
 
       {/* STATS */}
       <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
         {stats.map((s) => (
           <div
             key={s.label}
-            className="rounded-2xl border border-stone-200 bg-white p-4"
+            className="rounded-lg border border-stone-200 bg-white p-4"
           >
             <p className="text-xs text-stone-500">{s.label}</p>
             <p
@@ -193,9 +276,9 @@ export default function AnalyticsPage() {
       </div>
 
       {/* DAILY SALES CHART */}
-      <section className="mt-4 rounded-2xl border border-stone-200 bg-white p-5">
+      <section className="mt-4 rounded-lg border border-stone-200 bg-white p-5">
         <h2 className="text-sm font-semibold text-stone-900">Daily sales</h2>
-        {revenue === 0 ? (
+        {!days.some((day) => day.total !== 0) ? (
           <p className="py-6 text-center text-sm text-stone-500">
             Aa period ma koi sales nathi
           </p>
@@ -208,16 +291,17 @@ export default function AnalyticsPage() {
               aria-label="Daily sales bar chart"
             >
               {days.map((d, i) => {
-                const h = Math.round((d.total / maxDay) * (H - 30));
+                const h = Math.round((Math.max(0, d.total) / maxDay) * (H - 30));
+                const displayHeight = d.total < 0 ? 4 : Math.max(d.total > 0 ? 2 : 0, h);
                 return (
                   <g key={i}>
                     <rect
                       x={PAD + i * barW + 1}
-                      y={H - 20 - h}
+                      y={H - 20 - displayHeight}
                       width={Math.max(2, barW - 3)}
-                      height={Math.max(d.total > 0 ? 2 : 0, h)}
+                      height={displayHeight}
                       rx={2}
-                      fill={d.total > 0 ? "#047857" : "#e7e5e4"}
+                      fill={d.total > 0 ? "#047857" : d.total < 0 ? "#d97706" : "#e7e5e4"}
                     >
                       <title>
                         {d.label}: {inr(d.total)}
@@ -247,7 +331,7 @@ export default function AnalyticsPage() {
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         {/* TOP PRODUCTS */}
-        <section className="rounded-2xl border border-stone-200 bg-white p-5">
+        <section className="rounded-lg border border-stone-200 bg-white p-5">
           <h2 className="text-sm font-semibold text-stone-900">
             Top products (by revenue)
           </h2>
@@ -285,7 +369,7 @@ export default function AnalyticsPage() {
         </section>
 
         {/* PAYMENT SPLIT */}
-        <section className="rounded-2xl border border-stone-200 bg-white p-5">
+        <section className="rounded-lg border border-stone-200 bg-white p-5">
           <h2 className="text-sm font-semibold text-stone-900">
             Payment methods
           </h2>
@@ -306,7 +390,7 @@ export default function AnalyticsPage() {
                       <span className="text-stone-600">
                         {inr(total)}
                         <span className="ml-1 text-xs text-stone-400">
-                          · {revenue > 0 ? Math.round((total / revenue) * 100) : 0}%
+                          · {grossSales > 0 ? Math.round((total / grossSales) * 100) : 0}%
                         </span>
                       </span>
                     </div>
@@ -314,7 +398,7 @@ export default function AnalyticsPage() {
                       <div
                         className="h-1.5 rounded-full bg-stone-500"
                         style={{
-                          width: `${revenue > 0 ? Math.max(2, (total / revenue) * 100) : 0}%`,
+                          width: `${grossSales > 0 ? Math.max(2, (total / grossSales) * 100) : 0}%`,
                         }}
                       />
                     </div>
@@ -326,9 +410,9 @@ export default function AnalyticsPage() {
       </div>
 
       <p className="mt-4 text-xs text-stone-400">
-        Profit estimate = selling price − purchase cost. Juni sales mate aajno
-        purchase price vaparay che; navi sales ma sale vakhat no cost save thay
-        che.
+        Profit estimate nets invoice discounts and returns against recorded
+        purchase cost. Older records without a cost snapshot use the current
+        purchase price.
       </p>
     </div>
   );

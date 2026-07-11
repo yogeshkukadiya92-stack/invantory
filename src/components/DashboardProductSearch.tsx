@@ -35,6 +35,7 @@ export function DashboardProductSearch({ products }: { products: StockRow[] }) {
   const [selectedId, setSelectedId] = useState(products[0]?.product_id ?? "");
   const [activity, setActivity] = useState<ProductMovement[]>([]);
   const [loadingActivity, setLoadingActivity] = useState(false);
+  const [activityError, setActivityError] = useState<string | null>(null);
 
   const selected = useMemo(
     () => products.find((product) => product.product_id === selectedId) ?? null,
@@ -62,7 +63,8 @@ export function DashboardProductSearch({ products }: { products: StockRow[] }) {
     let cancelled = false;
     async function loadActivity() {
       setLoadingActivity(true);
-      const { data } = await supabase
+      setActivityError(null);
+      const { data, error } = await supabase
         .from("stock_movements")
         .select("id, type, quantity, reason, created_at")
         .eq("product_id", selectedId)
@@ -70,6 +72,7 @@ export function DashboardProductSearch({ products }: { products: StockRow[] }) {
         .limit(12);
       if (!cancelled) {
         setActivity((data ?? []) as ProductMovement[]);
+        setActivityError(error?.message ?? null);
         setLoadingActivity(false);
       }
     }
@@ -82,21 +85,25 @@ export function DashboardProductSearch({ products }: { products: StockRow[] }) {
   if (products.length === 0) return null;
 
   return (
-    <section className="mt-6 rounded-2xl border border-stone-200 bg-white">
+    <section className="mt-6 rounded-lg border border-stone-200 bg-white">
       <div className="border-b border-stone-100 px-4 py-3">
         <h2 className="text-sm font-semibold text-stone-900">Product search</h2>
       </div>
 
       <div className="grid gap-4 p-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
         <div>
-          <input
+          <label className="block">
+            <span className="sr-only">Search products</span>
+            <input
             className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             placeholder="Product name, SKU, barcode search karo..."
-          />
+            type="search"
+            />
+          </label>
 
-          <div className="mt-3 overflow-hidden rounded-xl border border-stone-100">
+          <div className="mt-3 overflow-hidden rounded-lg border border-stone-100">
             {results.length === 0 ? (
               <p className="px-3 py-4 text-sm text-stone-500">
                 Product nathi malyo.
@@ -142,8 +149,8 @@ export function DashboardProductSearch({ products }: { products: StockRow[] }) {
         </div>
 
         {selected && (
-          <div className="space-y-4">
-            <div className="rounded-xl border border-stone-100 bg-stone-50 p-4">
+          <div className="space-y-4 lg:border-l lg:border-stone-200 lg:pl-4">
+            <div>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <p className="text-base font-semibold text-stone-900">
@@ -155,7 +162,7 @@ export function DashboardProductSearch({ products }: { products: StockRow[] }) {
                       .join(" · ") || "No SKU/barcode"}
                   </p>
                 </div>
-                <span className="rounded-full bg-white px-3 py-1 text-sm font-semibold text-stone-900">
+                <span className="rounded-full bg-stone-100 px-3 py-1 text-sm font-semibold text-stone-900">
                   {selected.stock} {selected.unit}
                 </span>
               </div>
@@ -203,16 +210,23 @@ export function DashboardProductSearch({ products }: { products: StockRow[] }) {
               </div>
             </div>
 
-            <div className="rounded-xl border border-stone-100">
-              <div className="border-b border-stone-100 px-3 py-2">
+            <div className="border-t border-stone-200 pt-3">
+              <div className="pb-2">
                 <h3 className="text-sm font-semibold text-stone-900">
                   Product activity
                 </h3>
               </div>
               {loadingActivity ? (
-                <p className="px-3 py-4 text-sm text-stone-500">Loading...</p>
+                <div className="space-y-2 py-2" role="status" aria-label="Loading product activity">
+                  <div className="h-10 animate-pulse rounded-md bg-stone-100" />
+                  <div className="h-10 animate-pulse rounded-md bg-stone-100" />
+                </div>
+              ) : activityError ? (
+                <p className="rounded-md bg-red-50 px-3 py-3 text-sm text-red-800">
+                  {activityError}
+                </p>
               ) : activity.length === 0 ? (
-                <p className="px-3 py-4 text-sm text-stone-500">
+                <p className="py-3 text-sm text-stone-500">
                   Aa product ni activity nathi.
                 </p>
               ) : (
@@ -220,7 +234,7 @@ export function DashboardProductSearch({ products }: { products: StockRow[] }) {
                   {activity.map((movement) => (
                     <li
                       key={movement.id}
-                      className="flex items-center justify-between px-3 py-2.5"
+                    className="flex items-center justify-between py-2.5"
                     >
                       <div className="min-w-0">
                         <p className="text-sm font-medium text-stone-900">

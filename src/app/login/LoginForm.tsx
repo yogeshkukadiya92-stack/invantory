@@ -93,11 +93,17 @@ export function LoginForm({
           </p>
         </div>
 
-        <div className="rounded-2xl bg-white p-6 shadow-sm border border-stone-200">
+        <form
+          className="rounded-lg border border-stone-200 bg-white p-6 shadow-sm"
+          onSubmit={(event) => {
+            event.preventDefault();
+            void handleSubmit();
+          }}
+        >
           {!isBackendConfigured && (
             <div className="mb-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
               MongoDB is not configured on this deployment. Add MONGODB_URI
-              and SESSION_SECRET, then redeploy.
+              and a SESSION_SECRET of at least 32 characters, then redeploy.
             </div>
           )}
 
@@ -112,6 +118,7 @@ export function LoginForm({
               <input
                 id="full-name"
                 type="text"
+                required={mode === "signup"}
                 value={fullName}
                 onChange={(e) => setFullName(e.target.value)}
                 className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
@@ -131,6 +138,7 @@ export function LoginForm({
             <input
               id="email"
               type="email"
+              required
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               className="w-full rounded-lg border border-stone-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
@@ -150,9 +158,9 @@ export function LoginForm({
               <input
                 id="password"
                 type={showPassword ? "text" : "password"}
+                required
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && handleSubmit()}
                 className="w-full rounded-lg border border-stone-300 px-3 py-2 pr-11 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
                 placeholder="••••••••"
                 autoComplete={mode === "signin" ? "current-password" : "new-password"}
@@ -211,8 +219,10 @@ export function LoginForm({
           )}
 
           <button
-            onClick={handleSubmit}
-            disabled={loading || !email || !password}
+            type="submit"
+            disabled={
+              loading || !email || !password || (mode === "signup" && !fullName.trim())
+            }
             className="w-full rounded-lg bg-emerald-700 py-2.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50 transition-colors"
           >
             {loading
@@ -221,13 +231,14 @@ export function LoginForm({
                 ? "Sign in"
                 : "Create account"}
           </button>
-        </div>
+        </form>
 
         <p className="mt-4 text-center text-sm text-stone-600">
           {mode === "signin" ? (
             <>
               New here?{" "}
               <button
+                type="button"
                 onClick={() => setMode("signup")}
                 className="font-medium text-emerald-700 hover:underline"
               >
@@ -238,6 +249,7 @@ export function LoginForm({
             <>
               Already have an account?{" "}
               <button
+                type="button"
                 onClick={() => setMode("signin")}
                 className="font-medium text-emerald-700 hover:underline"
               >

@@ -1,7 +1,9 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { Modal, PageHeader, useToast } from "@/components/DashboardUI";
 import { createClient } from "@/lib/mongodb/client";
 import type {
   CreateSaleResult,
@@ -23,6 +25,7 @@ interface Line {
 export default function NewSalePage() {
   const router = useRouter();
   const supabase = createClient();
+  const { showToast } = useToast();
 
   const [lines, setLines] = useState<Line[]>([]);
   const [search, setSearch] = useState("");
@@ -33,6 +36,7 @@ export default function NewSalePage() {
   const [locationId, setLocationId] = useState("");
   const [showQuickAdd, setShowQuickAdd] = useState(false);
   const [quickCustomer, setQuickCustomer] = useState({ name: "", phone: "" });
+  const [quickAdding, setQuickAdding] = useState(false);
   const [discount, setDiscount] = useState("");
   const [paymentMethod, setPaymentMethod] = useState("cash");
   const [paidFull, setPaidFull] = useState(true);
@@ -154,6 +158,8 @@ export default function NewSalePage() {
 
   async function quickAddCustomer() {
     if (!quickCustomer.name.trim()) return;
+    setQuickAdding(true);
+    setError(null);
     const { data, error } = await supabase
       .from("customers")
       .insert({
@@ -164,6 +170,7 @@ export default function NewSalePage() {
       .single();
     if (error) {
       setError(error.message);
+      setQuickAdding(false);
       return;
     }
     const c = data as Customer;
@@ -173,6 +180,8 @@ export default function NewSalePage() {
     setCustomerId(c.id);
     setQuickCustomer({ name: "", phone: "" });
     setShowQuickAdd(false);
+    setQuickAdding(false);
+    showToast("Customer added and selected");
   }
 
   // Totals
@@ -254,35 +263,51 @@ export default function NewSalePage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-xl font-semibold text-stone-900">New sale</h1>
-        {locations.length > 1 && (
-          <select
-            className={input}
-            value={locationId}
-            onChange={(e) => {
-              setLocationId(e.target.value);
-              localStorage.setItem("sale_location", e.target.value);
-            }}
-          >
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>
-                📍 {l.name}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
+      <PageHeader
+        title="New sale"
+        description="Create an invoice and deduct stock from the selected location."
+        actions={
+          <>
+            {locations.length > 1 && (
+              <select
+                aria-label="Sale location"
+                className={input}
+                value={locationId}
+                onChange={(e) => {
+                  setLocationId(e.target.value);
+                  localStorage.setItem("sale_location", e.target.value);
+                }}
+              >
+                {locations.map((l) => (
+                  <option key={l.id} value={l.id}>
+                    {l.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Link
+              href="/sales"
+              className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
+            >
+              Cancel
+            </Link>
+          </>
+        }
+      />
 
       {/* PRODUCT SEARCH */}
       <div className="relative mt-4">
+        <label htmlFor="sale-product-search" className="mb-1 block text-xs font-medium text-stone-600">
+          Product or barcode
+        </label>
         <input
+          id="sale-product-search"
           ref={searchRef}
           className={`${input} w-full py-3`}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && handleSearchEnter()}
-          placeholder="🔍 Product search karo athva barcode scan karo..."
+          placeholder="Search product or scan barcode"
           autoComplete="off"
         />
         {results.length > 0 && (
@@ -290,7 +315,9 @@ export default function NewSalePage() {
             {results.map((p) => (
               <li key={p.product_id}>
                 <button
+                  type="button"
                   onClick={() => addProduct(p)}
+                  aria-label={`Add ${p.name} to sale`}
                   className="flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-stone-50"
                 >
                   <div className="min-w-0">
@@ -311,7 +338,7 @@ export default function NewSalePage() {
       </div>
 
       {/* LINES */}
-      <div className="mt-4 overflow-hidden rounded-2xl border border-stone-200 bg-white">
+      <div className="mt-4 overflow-hidden rounded-lg border border-stone-200 bg-white">
         {lines.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-stone-500">
             Upar search karine items add karo
@@ -343,8 +370,11 @@ export default function NewSalePage() {
                       </td>
                       <td className="px-2 py-2 text-right">
                         <input
+                          aria-label={`Quantity for ${l.name}`}
                           type="number"
                           inputMode="decimal"
+                          min="0.001"
+                          step="any"
                           className={`${input} w-20 text-right ${
                             qty > l.stock ? "border-red-400" : ""
                           }`}
@@ -356,8 +386,11 @@ export default function NewSalePage() {
                       </td>
                       <td className="px-2 py-2 text-right">
                         <input
+                          aria-label={`Price for ${l.name}`}
                           type="number"
                           inputMode="decimal"
+                          min="0"
+                          step="0.01"
                           className={`${input} w-24 text-right`}
                           value={l.price}
                           onChange={(e) =>
@@ -373,11 +406,13 @@ export default function NewSalePage() {
                       </td>
                       <td className="px-2 py-2 text-right">
                         <button
+                          type="button"
                           onClick={() => removeLine(l.product_id)}
                           className="px-1 text-stone-400 hover:text-red-600"
                           title="Remove"
+                          aria-label={`Remove ${l.name}`}
                         >
-                          ✕
+                          Remove
                         </button>
                       </td>
                     </tr>
@@ -390,11 +425,17 @@ export default function NewSalePage() {
       </div>
 
       {/* CUSTOMER + PAYMENT */}
-      <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl border border-stone-200 bg-white p-4">
-          <label className="text-xs font-medium text-stone-500">Customer</label>
+      <div className="mt-4 grid overflow-hidden rounded-lg border border-stone-200 bg-white sm:grid-cols-2 sm:divide-x sm:divide-stone-200">
+        <section className="p-4" aria-labelledby="sale-customer-heading">
+          <h2 id="sale-customer-heading" className="text-sm font-semibold text-stone-900">
+            Customer
+          </h2>
+          <label htmlFor="sale-customer" className="mt-3 block text-xs font-medium text-stone-500">
+            Customer account
+          </label>
           <div className="mt-1 flex gap-2">
             <select
+              id="sale-customer"
               className={`${input} flex-1`}
               value={customerId}
               onChange={(e) => setCustomerId(e.target.value)}
@@ -408,53 +449,30 @@ export default function NewSalePage() {
               ))}
             </select>
             <button
-              onClick={() => setShowQuickAdd((v) => !v)}
+              type="button"
+              onClick={() => setShowQuickAdd(true)}
               className="shrink-0 rounded-lg border border-stone-300 px-3 py-2 text-sm text-stone-700 hover:bg-stone-50"
             >
-              + New
+              New
             </button>
           </div>
-          {showQuickAdd && (
-            <div className="mt-2 flex flex-col gap-2">
-              <input
-                className={input}
-                placeholder="Customer name"
-                value={quickCustomer.name}
-                onChange={(e) =>
-                  setQuickCustomer((c) => ({ ...c, name: e.target.value }))
-                }
-              />
-              <div className="flex gap-2">
-                <input
-                  className={`${input} flex-1`}
-                  placeholder="Phone (optional)"
-                  value={quickCustomer.phone}
-                  onChange={(e) =>
-                    setQuickCustomer((c) => ({ ...c, phone: e.target.value }))
-                  }
-                />
-                <button
-                  onClick={quickAddCustomer}
-                  className="rounded-lg bg-emerald-700 px-3 py-2 text-sm font-medium text-white hover:bg-emerald-800"
-                >
-                  Add
-                </button>
-              </div>
-            </div>
-          )}
 
-          <label className="mt-3 block text-xs font-medium text-stone-500">
+          <label htmlFor="sale-note" className="mt-3 block text-xs font-medium text-stone-500">
             Note (optional)
           </label>
           <input
+            id="sale-note"
             className={`${input} mt-1 w-full`}
             value={note}
             onChange={(e) => setNote(e.target.value)}
             placeholder="e.g. delivery Monday"
           />
-        </div>
+        </section>
 
-        <div className="rounded-2xl border border-stone-200 bg-white p-4">
+        <section className="border-t border-stone-200 p-4 sm:border-t-0" aria-labelledby="sale-payment-heading">
+          <h2 id="sale-payment-heading" className="mb-3 text-sm font-semibold text-stone-900">
+            Payment
+          </h2>
           <div className="flex justify-between text-sm text-stone-600">
             <span>Subtotal</span>
             <span>{inr(subtotal)}</span>
@@ -466,8 +484,11 @@ export default function NewSalePage() {
           <div className="mt-1 flex items-center justify-between text-sm text-stone-600">
             <span>Discount</span>
             <input
+              aria-label="Discount amount"
               type="number"
               inputMode="decimal"
+              min="0"
+              step="0.01"
               className={`${input} w-24 text-right`}
               value={discount}
               onChange={(e) => setDiscount(e.target.value)}
@@ -482,7 +503,9 @@ export default function NewSalePage() {
           <div className="mt-3 flex gap-2">
             {["cash", "upi", "card", "credit"].map((m) => (
               <button
+                type="button"
                 key={m}
+                aria-pressed={paymentMethod === m}
                 onClick={() => {
                   setPaymentMethod(m);
                   if (m === "credit") {
@@ -504,8 +527,9 @@ export default function NewSalePage() {
           </div>
 
           <label className="mt-3 flex items-center gap-2 text-sm text-stone-700">
-            <input
-              type="checkbox"
+              <input
+                aria-label="Full payment received"
+                type="checkbox"
               checked={paidFull}
               onChange={(e) => setPaidFull(e.target.checked)}
               className="h-4 w-4 accent-emerald-700"
@@ -516,8 +540,12 @@ export default function NewSalePage() {
             <div className="mt-2 flex items-center justify-between text-sm text-stone-600">
               <span>Paid amount</span>
               <input
+                aria-label="Paid amount"
                 type="number"
                 inputMode="decimal"
+                min="0"
+                max={grandTotal}
+                step="0.01"
                 className={`${input} w-28 text-right`}
                 value={paidAmount}
                 onChange={(e) => setPaidAmount(e.target.value)}
@@ -525,7 +553,7 @@ export default function NewSalePage() {
               />
             </div>
           )}
-        </div>
+        </section>
       </div>
 
       {error && (
@@ -535,12 +563,75 @@ export default function NewSalePage() {
       )}
 
       <button
+        type="button"
         onClick={saveSale}
         disabled={saving || lines.length === 0}
         className="mt-4 w-full rounded-xl bg-emerald-700 py-3.5 text-base font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
       >
-        {saving ? "Saving..." : `💾 Save sale — ${inr(grandTotal)}`}
+        {saving ? "Saving..." : `Save sale · ${inr(grandTotal)}`}
       </button>
+
+      <Modal
+        open={showQuickAdd}
+        onClose={() => {
+          if (!quickAdding) setShowQuickAdd(false);
+        }}
+        title="Add customer"
+        description="Create a customer and attach it to this sale."
+        size="sm"
+        footer={
+          <>
+            <button
+              type="button"
+              disabled={quickAdding}
+              onClick={() => setShowQuickAdd(false)}
+              className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              disabled={quickAdding || !quickCustomer.name.trim()}
+              onClick={quickAddCustomer}
+              className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
+            >
+              {quickAdding ? "Adding..." : "Add customer"}
+            </button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="quick-customer-name" className="text-sm font-medium text-stone-700">
+              Customer name
+            </label>
+            <input
+              id="quick-customer-name"
+              autoFocus
+              required
+              className={`${input} mt-1 w-full`}
+              value={quickCustomer.name}
+              onChange={(e) =>
+                setQuickCustomer((customer) => ({ ...customer, name: e.target.value }))
+              }
+            />
+          </div>
+          <div>
+            <label htmlFor="quick-customer-phone" className="text-sm font-medium text-stone-700">
+              Phone (optional)
+            </label>
+            <input
+              id="quick-customer-phone"
+              inputMode="tel"
+              className={`${input} mt-1 w-full`}
+              value={quickCustomer.phone}
+              onChange={(e) =>
+                setQuickCustomer((customer) => ({ ...customer, phone: e.target.value }))
+              }
+            />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

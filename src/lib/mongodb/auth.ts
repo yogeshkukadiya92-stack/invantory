@@ -11,10 +11,12 @@ import { getMongoConfig } from "./config";
 import { getDb } from "./connection";
 
 export const SESSION_COOKIE = "inventory_session";
+export const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
 
 export interface MongoUser {
   id: string;
   email: string;
+  role: "admin" | "staff";
   user_metadata?: { full_name?: string };
 }
 
@@ -47,6 +49,8 @@ function verifyPassword(password: string, stored: string) {
   return actual.length === expected.length && timingSafeEqual(actual, expected);
 }
 
+const DUMMY_PASSWORD_HASH = hashPassword("inventory-dummy-password");
+
 export function createSessionToken(userId: string) {
   const payload = `${userId}.${Date.now()}`;
   return `${payload}.${sign(payload)}`;
@@ -67,13 +71,22 @@ export function verifySessionToken(token: string | undefined) {
   ) {
     return null;
   }
+  const issuedAt = Number(parts[1]);
+  const age = Date.now() - issuedAt;
+  if (
+    !Number.isFinite(issuedAt) ||
+    age < -5 * 60 * 1000 ||
+    age > SESSION_MAX_AGE_SECONDS * 1000
+  ) {
+    return null;
+  }
   return parts[0];
 }
 
 export function sessionCookieOptions() {
   return {
     httpOnly: true,
-    maxAge: 60 * 60 * 24 * 30,
+    maxAge: SESSION_MAX_AGE_SECONDS,
     path: "/",
     sameSite: "lax" as const,
     secure: process.env.NODE_ENV === "production",
@@ -97,6 +110,7 @@ export async function getUserById(userId: string) {
   return {
     id: profile.id,
     email: profile.email,
+    role: profile.role,
     user_metadata: { full_name: profile.full_name },
   } satisfies MongoUser;
 }
@@ -106,7 +120,11 @@ export async function signInWithPassword(email: string, password: string) {
   const profile = await db
     .collection<ProfileDocument>("profiles")
     .findOne({ email: email.trim().toLowerCase() });
-  if (!profile || !verifyPassword(password, profile.password_hash)) {
+  const validPassword = verifyPassword(
+    password,
+    profile?.password_hash ?? DUMMY_PASSWORD_HASH
+  );
+  if (!profile || !validPassword) {
     return { error: { message: "Invalid email or password" }, user: null };
   }
   return {
@@ -115,6 +133,7 @@ export async function signInWithPassword(email: string, password: string) {
     user: {
       id: profile.id,
       email: profile.email,
+      role: profile.role,
       user_metadata: { full_name: profile.full_name },
     } satisfies MongoUser,
   };
@@ -131,6 +150,19 @@ export async function signUpWithPassword({
 }) {
   const db = await getDb();
   const normalizedEmail = email.trim().toLowerCase();
+  const normalizedName = fullName.trim();
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalizedEmail)) {
+    return { error: { message: "Enter a valid email address" }, user: null };
+  }
+  if (!normalizedName || normalizedName.length > 120) {
+    return { error: { message: "Full name is required" }, user: null };
+  }
+  if (password.length < 8 || password.length > 128) {
+    return {
+      error: { message: "Password must be between 8 and 128 characters" },
+      user: null,
+    };
+  }
   const profiles = db.collection<ProfileDocument>("profiles");
   const existing = await profiles.findOne({ email: normalizedEmail });
   if (existing) return { error: { message: "Email already registered" }, user: null };
@@ -156,7 +188,7 @@ export async function signUpWithPassword({
   const profile: ProfileDocument = {
     id: userId,
     email: normalizedEmail,
-    full_name: fullName.trim(),
+    full_name: normalizedName,
     password_hash: hashPassword(password),
     role: existingCount === 0 ? "admin" : "staff",
     created_at: now,
@@ -170,6 +202,7 @@ export async function signUpWithPassword({
     user: {
       id: userId,
       email: normalizedEmail,
+      role: profile.role,
       user_metadata: { full_name: profile.full_name },
     } satisfies MongoUser,
   };

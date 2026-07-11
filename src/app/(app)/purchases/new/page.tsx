@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { createClient } from "@/lib/mongodb/client";
 import type { Location, StockRow, Supplier } from "@/lib/types";
+import { Modal } from "@/components/DashboardUI";
 
 interface Line {
   product_id: string;
@@ -185,6 +186,8 @@ export default function NewPurchasePage() {
       })),
       p_supplier_id: supplierId || null,
       p_note: note.trim() || null,
+      p_receive_now: receiveNow,
+      p_location_id: receiveNow ? locationId || null : null,
     });
 
     if (error) {
@@ -193,17 +196,6 @@ export default function NewPurchasePage() {
       return;
     }
     const poId = (data as { po_id: string }).po_id;
-    if (receiveNow) {
-      const { error: receiveError } = await supabase.rpc("receive_purchase_order", {
-        p_po_id: poId,
-        p_location_id: locationId || null,
-      });
-      if (receiveError) {
-        window.alert(
-          `PO save thayu, pan stock entry fail thayu: ${receiveError.message}`
-        );
-      }
-    }
     router.push(`/purchases/${poId}`);
   }
 
@@ -218,12 +210,15 @@ export default function NewPurchasePage() {
 
   return (
     <div className="mx-auto max-w-3xl">
-      <h1 className="text-xl font-semibold text-stone-900">New purchase</h1>
+      <h1 className="text-xl font-semibold text-stone-950">New purchase</h1>
+      <p className="mt-1 text-sm text-stone-500">Create a purchase order and optionally receive stock immediately.</p>
 
       <div className="mt-4 grid gap-2 sm:grid-cols-2">
         <div className="space-y-2">
           <div className="flex gap-2">
-            <select
+            <label className="min-w-0 flex-1">
+              <span className="sr-only">Supplier</span>
+              <select
               className={`${input} min-w-0 flex-1`}
               value={supplierId}
               onChange={(e) => setSupplierId(e.target.value)}
@@ -234,53 +229,29 @@ export default function NewPurchasePage() {
                   {s.name}
                 </option>
               ))}
-            </select>
+              </select>
+            </label>
             <button
               type="button"
-              onClick={() => setShowSupplierForm((v) => !v)}
+              onClick={() => setShowSupplierForm(true)}
               className="shrink-0 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
             >
-              + Supplier
+              Add supplier
             </button>
           </div>
-          {showSupplierForm && (
-            <div className="grid gap-2 rounded-xl border border-stone-200 bg-white p-3 sm:grid-cols-[1fr_140px_auto]">
-              <input
-                className={input}
-                value={newSupplier.name}
-                onChange={(e) =>
-                  setNewSupplier((s) => ({ ...s, name: e.target.value }))
-                }
-                placeholder="Supplier name"
-              />
-              <input
-                className={input}
-                value={newSupplier.phone}
-                onChange={(e) =>
-                  setNewSupplier((s) => ({ ...s, phone: e.target.value }))
-                }
-                placeholder="Phone"
-              />
-              <button
-                type="button"
-                onClick={addSupplier}
-                disabled={savingSupplier}
-                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
-              >
-                {savingSupplier ? "Saving..." : "Add"}
-              </button>
-            </div>
-          )}
         </div>
-        <input
-          className={input}
-          value={note}
-          onChange={(e) => setNote(e.target.value)}
-          placeholder="Note (optional)"
-        />
+        <label>
+          <span className="sr-only">Purchase note</span>
+          <input
+            className={input}
+            value={note}
+            onChange={(e) => setNote(e.target.value)}
+            placeholder="Note (optional)"
+          />
+        </label>
       </div>
 
-      <div className="mt-3 flex flex-col gap-2 rounded-xl border border-stone-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
+      <div className="mt-3 flex flex-col gap-2 rounded-lg border border-stone-200 bg-white p-3 sm:flex-row sm:items-center sm:justify-between">
         <label className="flex items-center gap-2 text-sm font-medium text-stone-700">
           <input
             type="checkbox"
@@ -292,10 +263,10 @@ export default function NewPurchasePage() {
         </label>
         {receiveNow && locations.length > 1 && (
           <select
+            aria-label="Stock receive location"
             className={input}
             value={locationId}
             onChange={(e) => setLocationId(e.target.value)}
-            title="Stock receive location"
           >
             {locations.map((l) => (
               <option key={l.id} value={l.id}>
@@ -308,19 +279,23 @@ export default function NewPurchasePage() {
       </div>
 
       <div className="relative mt-3">
-        <input
+        <label className="block">
+          <span className="sr-only">Search products</span>
+          <input
           ref={searchRef}
           className={`${input} w-full py-3`}
           value={search}
           onChange={(e) => setSearch(e.target.value)}
-          placeholder="🔍 Product search karo..."
+          placeholder="Search products by name, SKU, or barcode"
           autoComplete="off"
-        />
+          />
+        </label>
         {results.length > 0 && (
-          <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg">
+          <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-stone-200 bg-white shadow-lg">
             {results.map((p) => (
               <li key={p.product_id}>
                 <button
+                  type="button"
                   onClick={() => addProduct(p)}
                   className="flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-stone-50"
                 >
@@ -341,7 +316,7 @@ export default function NewPurchasePage() {
         )}
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-2xl border border-stone-200 bg-white">
+      <div className="mt-4 overflow-hidden rounded-lg border border-stone-200 bg-white">
         {lines.length === 0 ? (
           <p className="px-4 py-8 text-center text-sm text-stone-500">
             Upar search karine items add karo
@@ -371,8 +346,11 @@ export default function NewPurchasePage() {
                       <input
                         type="number"
                         inputMode="decimal"
+                        min="0.001"
+                        step="any"
                         className={`${input} w-20 text-right`}
                         value={l.quantity}
+                        aria-label={`Quantity for ${l.name}`}
                         onChange={(e) =>
                           updateLine(l.product_id, "quantity", e.target.value)
                         }
@@ -382,8 +360,11 @@ export default function NewPurchasePage() {
                       <input
                         type="number"
                         inputMode="decimal"
+                        min="0"
+                        step="0.01"
                         className={`${input} w-24 text-right`}
                         value={l.cost}
+                        aria-label={`Cost for ${l.name}`}
                         onChange={(e) =>
                           updateLine(l.product_id, "cost", e.target.value)
                         }
@@ -397,11 +378,13 @@ export default function NewPurchasePage() {
                     </td>
                     <td className="px-2 py-2 text-right">
                       <button
+                        type="button"
                         onClick={() => removeLine(l.product_id)}
                         className="px-1 text-stone-400 hover:text-red-600"
+                        aria-label={`Remove ${l.name}`}
                         title="Remove"
                       >
-                        ✕
+                        Remove
                       </button>
                     </td>
                   </tr>
@@ -419,6 +402,7 @@ export default function NewPurchasePage() {
       )}
 
       <button
+        type="button"
         onClick={savePO}
         disabled={saving || lines.length === 0}
         className="mt-4 w-full rounded-xl bg-emerald-700 py-3.5 text-base font-semibold text-white hover:bg-emerald-800 disabled:opacity-50"
@@ -426,9 +410,34 @@ export default function NewPurchasePage() {
         {saving
           ? "Saving..."
           : receiveNow
-            ? `📦 Save purchase + stock — ${inr(total)}`
-            : `📦 Create PO — ${inr(total)}`}
+            ? `Save purchase and receive stock — ${inr(total)}`
+            : `Create purchase order — ${inr(total)}`}
       </button>
+
+      <Modal
+        open={showSupplierForm}
+        onClose={() => (savingSupplier ? undefined : setShowSupplierForm(false))}
+        title="Add supplier"
+        description="The supplier will be selected on this purchase"
+        size="sm"
+        footer={
+          <>
+            <button type="button" onClick={() => setShowSupplierForm(false)} disabled={savingSupplier} className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50">Cancel</button>
+            <button type="button" onClick={addSupplier} disabled={savingSupplier} className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50">{savingSupplier ? "Saving..." : "Add supplier"}</button>
+          </>
+        }
+      >
+        <div className="space-y-4">
+          <div>
+            <label htmlFor="new-supplier-name" className="mb-1 block text-sm font-medium text-stone-700">Supplier name</label>
+            <input id="new-supplier-name" autoFocus className={`${input} w-full`} value={newSupplier.name} onChange={(e) => setNewSupplier((s) => ({ ...s, name: e.target.value }))} />
+          </div>
+          <div>
+            <label htmlFor="new-supplier-phone" className="mb-1 block text-sm font-medium text-stone-700">Phone</label>
+            <input id="new-supplier-phone" type="tel" className={`${input} w-full`} value={newSupplier.phone} onChange={(e) => setNewSupplier((s) => ({ ...s, phone: e.target.value }))} />
+          </div>
+        </div>
+      </Modal>
     </div>
   );
 }

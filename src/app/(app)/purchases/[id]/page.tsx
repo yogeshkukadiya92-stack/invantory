@@ -9,6 +9,7 @@ import type {
   PurchaseOrderItem,
   Supplier,
 } from "@/lib/types";
+import { ConfirmDialog } from "@/components/DashboardUI";
 
 export default function PurchaseDetailPage({
   params,
@@ -24,6 +25,7 @@ export default function PurchaseDetailPage({
   const [locations, setLocations] = useState<Location[]>([]);
   const [locationId, setLocationId] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<"cancel" | "receive" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -59,12 +61,7 @@ export default function PurchaseDetailPage({
 
   async function receive() {
     if (busy) return;
-    if (
-      !confirm(
-        "Goods receive karva che? Badhi items no stock automatic 'in' thashe."
-      )
-    )
-      return;
+    setConfirmAction(null);
     setBusy(true);
     setError(null);
     const { error } = await supabase.rpc("receive_purchase_order", {
@@ -81,7 +78,7 @@ export default function PurchaseDetailPage({
 
   async function cancel() {
     if (busy) return;
-    if (!confirm("PO cancel karvo che?")) return;
+    setConfirmAction(null);
     setBusy(true);
     setError(null);
     const { error } = await supabase.rpc("cancel_purchase_order", {
@@ -135,31 +132,33 @@ export default function PurchaseDetailPage({
             </Link>
             {locations.length > 1 && (
               <select
+                aria-label="Receive at location"
                 className="rounded-lg border border-stone-300 bg-white px-2 py-2 text-sm"
                 value={locationId}
                 onChange={(e) => setLocationId(e.target.value)}
-                title="Receive at location"
               >
                 {locations.map((l) => (
                   <option key={l.id} value={l.id}>
-                    📍 {l.name}
+                    {l.name}
                   </option>
                 ))}
               </select>
             )}
             <button
-              onClick={cancel}
+              type="button"
+              onClick={() => setConfirmAction("cancel")}
               disabled={busy}
               className="rounded-lg border border-red-200 px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50 disabled:opacity-50"
             >
               Cancel PO
             </button>
             <button
-              onClick={receive}
+              type="button"
+              onClick={() => setConfirmAction("receive")}
               disabled={busy}
               className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
             >
-              {busy ? "Processing..." : "✓ Receive goods"}
+              {busy ? "Processing..." : "Receive goods"}
             </button>
           </div>
         )}
@@ -179,7 +178,7 @@ export default function PurchaseDetailPage({
         </p>
       )}
 
-      <div className="mt-4 rounded-2xl border border-stone-200 bg-white p-6">
+      <div className="mt-4 rounded-lg border border-stone-200 bg-white p-6">
         <div className="flex items-start justify-between border-b border-stone-200 pb-4">
           <div>
             <p className="text-sm font-bold text-stone-900">{po.po_no}</p>
@@ -253,7 +252,7 @@ export default function PurchaseDetailPage({
         )}
         {po.received_at && (
           <p className="mt-3 text-xs text-emerald-700">
-            ✓ Received on{" "}
+            Received on{" "}
             {new Date(po.received_at).toLocaleString("en-IN", {
               dateStyle: "medium",
               timeStyle: "short",
@@ -261,6 +260,20 @@ export default function PurchaseDetailPage({
           </p>
         )}
       </div>
+      <ConfirmDialog
+        open={confirmAction !== null}
+        onCancel={() => setConfirmAction(null)}
+        onConfirm={confirmAction === "receive" ? receive : cancel}
+        busy={busy}
+        tone={confirmAction === "receive" ? "primary" : "danger"}
+        title={confirmAction === "receive" ? "Receive this purchase?" : "Cancel this purchase?"}
+        description={
+          confirmAction === "receive"
+            ? "Every item will be added to stock at the selected location."
+            : "The order will remain in history but cannot be received or edited afterward."
+        }
+        confirmLabel={confirmAction === "receive" ? "Receive goods" : "Cancel purchase"}
+      />
     </div>
   );
 }

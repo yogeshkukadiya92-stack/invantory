@@ -11,7 +11,9 @@ declare global {
 export async function getDb(): Promise<Db> {
   const config = getMongoConfig();
   if (!config) {
-    throw new Error("MongoDB is not configured. Set MONGODB_URI and SESSION_SECRET.");
+    throw new Error(
+      "MongoDB is not configured. Set MONGODB_URI and a SESSION_SECRET of at least 32 characters."
+    );
   }
 
   if (process.env.NODE_ENV === "development") {

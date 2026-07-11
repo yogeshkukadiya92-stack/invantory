@@ -4,7 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import JsBarcode from "jsbarcode";
 import { createClient } from "@/lib/mongodb/client";
-import type { Category, Product } from "@/lib/types";
+import type { Category } from "@/lib/types";
+import { ConfirmDialog } from "@/components/DashboardUI";
 
 interface Props {
   productId?: string; // hoy to edit mode
@@ -21,6 +22,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [missingProduct, setMissingProduct] = useState(false);
+  const [confirmDeactivate, setConfirmDeactivate] = useState(false);
 
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -32,10 +34,12 @@ export function ProductForm({ productId, initialBarcode }: Props) {
     barcode: initialBarcode ?? "",
     category_id: "",
     unit: "pcs",
-    opening_stock: "0",
+    opening_stock: "",
     purchase_price: "",
     selling_price: "",
-    min_stock_level: "0",
+    mrp: "",
+    weight_grams: "",
+    min_stock_level: "",
     hsn_code: "",
     gst_rate: "0",
   });
@@ -68,10 +72,12 @@ export function ProductForm({ productId, initialBarcode }: Props) {
           barcode: data.barcode ?? "",
           category_id: data.category_id ?? "",
           unit: data.unit,
-          opening_stock: "0",
-          purchase_price: String(data.purchase_price),
-          selling_price: String(data.selling_price),
-          min_stock_level: String(data.min_stock_level),
+          opening_stock: "",
+          purchase_price: Number(data.purchase_price) > 0 ? String(data.purchase_price) : "",
+          selling_price: Number(data.selling_price) > 0 ? String(data.selling_price) : "",
+          mrp: Number(data.mrp) > 0 ? String(data.mrp) : "",
+          weight_grams: Number(data.weight_grams) > 0 ? String(data.weight_grams) : "",
+          min_stock_level: Number(data.min_stock_level) > 0 ? String(data.min_stock_level) : "",
           hsn_code: data.hsn_code ?? "",
           gst_rate: String(data.gst_rate ?? 0),
         });
@@ -134,6 +140,18 @@ export function ProductForm({ productId, initialBarcode }: Props) {
       setError("Opening stock 0 ke tena thi vadhare hovu joie");
       return;
     }
+    for (const [field, value] of [
+      ["Purchase price", form.purchase_price],
+      ["Selling price", form.selling_price],
+      ["MRP", form.mrp],
+      ["Weight", form.weight_grams],
+      ["Min stock level", form.min_stock_level],
+    ] as const) {
+      if (value.trim() && (!Number.isFinite(Number(value)) || Number(value) < 0)) {
+        setError(`${field} 0 ke tena thi vadhare hovu joie`);
+        return;
+      }
+    }
     setSaving(true);
     setError(null);
 
@@ -164,14 +182,19 @@ export function ProductForm({ productId, initialBarcode }: Props) {
       unit,
       purchase_price: Number(form.purchase_price) || 0,
       selling_price: Number(form.selling_price) || 0,
+      mrp: form.mrp.trim() ? Number(form.mrp) : null,
+      weight_grams: form.weight_grams.trim() ? Number(form.weight_grams) : null,
       min_stock_level: Number(form.min_stock_level) || 0,
       hsn_code: form.hsn_code.trim() || null,
       gst_rate: Number(form.gst_rate) || 0,
     };
 
-    const { data: savedProduct, error } = productId
+    const { error } = productId
       ? await supabase.from("products").update(payload).eq("id", productId).single()
-      : await supabase.from("products").insert(payload).select("id").single();
+      : await supabase.rpc("create_product", {
+          p_product: payload,
+          p_opening_stock: openingStock,
+        });
 
     if (error) {
       setError(
@@ -183,29 +206,14 @@ export function ProductForm({ productId, initialBarcode }: Props) {
       return;
     }
 
-    const newProductId = (savedProduct as Product | null)?.id;
-    if (!productId && newProductId && openingStock > 0) {
-      const { error: stockError } = await supabase.from("stock_movements").insert({
-        product_id: newProductId,
-        quantity: openingStock,
-        reason: "Opening stock",
-        type: "in",
-      });
-      if (stockError) {
-        setError("Product save thayu, pan opening stock save nathi thayu: " + stockError.message);
-        setSaving(false);
-        return;
-      }
-    }
     router.push("/products");
     router.refresh();
   }
 
   async function handleDeactivate() {
     if (!productId || saving) return;
-    if (!confirm("Product ne deactivate karvu che? (Data delete nahi thay)"))
-      return;
     setSaving(true);
+    setConfirmDeactivate(false);
     setError(null);
     const { error } = await supabase
       .from("products")
@@ -225,7 +233,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
 
   if (missingProduct) {
     return (
-      <div className="mx-auto max-w-lg rounded-2xl border border-red-100 bg-white p-5">
+      <div className="mx-auto max-w-lg rounded-lg border border-red-100 bg-white p-5">
         <h1 className="text-lg font-semibold text-stone-900">
           Product open nathi thai rahyu
         </h1>
@@ -251,7 +259,13 @@ export function ProductForm({ productId, initialBarcode }: Props) {
         {productId ? "Edit product" : "Add product"}
       </h1>
 
-      <div className="mt-4 space-y-4 rounded-2xl border border-stone-200 bg-white p-5">
+      <form
+        className="mt-4 space-y-4 rounded-lg border border-stone-200 bg-white p-5"
+        onSubmit={(event) => {
+          event.preventDefault();
+          handleSave();
+        }}
+      >
         <div className="flex items-center gap-4">
           {imagePreview || imageUrl ? (
             // eslint-disable-next-line @next/next/no-img-element
@@ -261,8 +275,8 @@ export function ProductForm({ productId, initialBarcode }: Props) {
               className="h-20 w-20 rounded-xl border border-stone-200 object-cover"
             />
           ) : (
-            <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-stone-100 text-2xl text-stone-400">
-              📦
+            <div className="flex h-20 w-20 items-center justify-center rounded-lg bg-stone-100 text-xs font-semibold text-stone-500">
+              IMAGE
             </div>
           )}
           <div className="flex flex-col gap-1.5">
@@ -271,6 +285,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
               <input
                 type="file"
                 accept="image/*"
+                aria-label="Product image"
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
@@ -301,8 +316,10 @@ export function ProductForm({ productId, initialBarcode }: Props) {
         </div>
 
         <div>
-          <label className={label}>Product name *</label>
+          <label htmlFor="product-name" className={label}>Product name *</label>
           <input
+            id="product-name"
+            required
             className={input}
             value={form.name}
             onChange={(e) => set("name", e.target.value)}
@@ -311,9 +328,10 @@ export function ProductForm({ productId, initialBarcode }: Props) {
         </div>
 
         <div>
-          <label className={label}>Barcode</label>
+            <label htmlFor="product-barcode" className={label}>Barcode</label>
           <div className="flex gap-2">
             <input
+              id="product-barcode"
               className={input}
               value={form.barcode}
               onChange={(e) => set("barcode", e.target.value)}
@@ -334,10 +352,11 @@ export function ProductForm({ productId, initialBarcode }: Props) {
           )}
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-3 sm:grid-cols-3">
           <div>
-            <label className={label}>SKU</label>
+            <label htmlFor="product-sku" className={label}>SKU</label>
             <input
+              id="product-sku"
               className={input}
               value={form.sku}
               onChange={(e) => set("sku", e.target.value)}
@@ -345,8 +364,9 @@ export function ProductForm({ productId, initialBarcode }: Props) {
             />
           </div>
           <div>
-            <label className={label}>Category</label>
+            <label htmlFor="product-category" className={label}>Category</label>
             <select
+              id="product-category"
               className={input}
               value={form.category_id}
               onChange={(e) => set("category_id", e.target.value)}
@@ -363,10 +383,13 @@ export function ProductForm({ productId, initialBarcode }: Props) {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={label}>Purchase price (₹)</label>
+            <label htmlFor="product-purchase-price" className={label}>Purchase price (₹)</label>
             <input
+              id="product-purchase-price"
               type="number"
               inputMode="decimal"
+              min="0"
+              step="any"
               className={input}
               value={form.purchase_price}
               onChange={(e) => set("purchase_price", e.target.value)}
@@ -374,22 +397,40 @@ export function ProductForm({ productId, initialBarcode }: Props) {
             />
           </div>
           <div>
-            <label className={label}>Selling price (₹)</label>
+            <label htmlFor="product-selling-price" className={label}>Selling price (₹)</label>
             <input
+              id="product-selling-price"
               type="number"
               inputMode="decimal"
+              min="0"
+              step="any"
               className={input}
               value={form.selling_price}
               onChange={(e) => set("selling_price", e.target.value)}
               placeholder="0.00"
             />
           </div>
+          <div>
+            <label htmlFor="product-mrp" className={label}>MRP (₹)</label>
+            <input
+              id="product-mrp"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="any"
+              className={input}
+              value={form.mrp}
+              onChange={(e) => set("mrp", e.target.value)}
+              placeholder="Optional"
+            />
+          </div>
         </div>
 
-        <div className="grid grid-cols-2 gap-3">
+        <div className="grid gap-3 sm:grid-cols-3">
           <div>
-            <label className={label}>HSN code</label>
+            <label htmlFor="product-hsn" className={label}>HSN code</label>
             <input
+              id="product-hsn"
               className={input}
               value={form.hsn_code}
               onChange={(e) => set("hsn_code", e.target.value)}
@@ -397,8 +438,9 @@ export function ProductForm({ productId, initialBarcode }: Props) {
             />
           </div>
           <div>
-            <label className={label}>GST rate</label>
+            <label htmlFor="product-gst" className={label}>GST rate</label>
             <select
+              id="product-gst"
               className={input}
               value={form.gst_rate}
               onChange={(e) => set("gst_rate", e.target.value)}
@@ -414,8 +456,9 @@ export function ProductForm({ productId, initialBarcode }: Props) {
 
         <div className="grid grid-cols-2 gap-3">
           <div>
-            <label className={label}>Unit label</label>
+            <label htmlFor="product-unit" className={label}>Unit label</label>
             <input
+              id="product-unit"
               className={input}
               value={form.unit}
               onChange={(e) => set("unit", e.target.value)}
@@ -423,21 +466,39 @@ export function ProductForm({ productId, initialBarcode }: Props) {
             />
           </div>
           <div>
-            <label className={label}>Min stock level</label>
+            <label htmlFor="product-min-stock" className={label}>Min stock level</label>
             <input
+              id="product-min-stock"
               type="number"
               inputMode="numeric"
+              min="0"
               className={input}
               value={form.min_stock_level}
               onChange={(e) => set("min_stock_level", e.target.value)}
+              placeholder="0"
+            />
+          </div>
+          <div>
+            <label htmlFor="product-weight" className={label}>Weight (grams)</label>
+            <input
+              id="product-weight"
+              type="number"
+              inputMode="decimal"
+              min="0"
+              step="any"
+              className={input}
+              value={form.weight_grams}
+              onChange={(e) => set("weight_grams", e.target.value)}
+              placeholder="Optional"
             />
           </div>
         </div>
 
         {!productId && (
           <div>
-            <label className={label}>Opening stock</label>
+            <label htmlFor="product-opening-stock" className={label}>Opening stock</label>
             <input
+              id="product-opening-stock"
               type="number"
               inputMode="numeric"
               min="0"
@@ -457,7 +518,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
 
         <div className="flex gap-2 pt-1">
           <button
-            onClick={handleSave}
+            type="submit"
             disabled={saving}
             className="flex-1 rounded-lg bg-emerald-700 py-2.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50 transition-colors"
           >
@@ -465,7 +526,8 @@ export function ProductForm({ productId, initialBarcode }: Props) {
           </button>
           {productId && (
             <button
-              onClick={handleDeactivate}
+              type="button"
+              onClick={() => setConfirmDeactivate(true)}
               disabled={saving}
               className="rounded-lg border border-red-200 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
             >
@@ -473,7 +535,16 @@ export function ProductForm({ productId, initialBarcode }: Props) {
             </button>
           )}
         </div>
-      </div>
+      </form>
+      <ConfirmDialog
+        open={confirmDeactivate}
+        onCancel={() => setConfirmDeactivate(false)}
+        onConfirm={handleDeactivate}
+        busy={saving}
+        title="Deactivate product?"
+        description="The product will be hidden from new sales and purchases. Existing invoices and stock history will remain available."
+        confirmLabel="Deactivate"
+      />
     </div>
   );
 }

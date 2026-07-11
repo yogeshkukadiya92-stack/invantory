@@ -20,18 +20,21 @@ export function ShareLowStockButton({ items }: { items: LowStockItem[] }) {
           `• ${i.name} — ${i.stock} ${i.unit} baki (min ${i.min_stock_level})`
       ),
     ];
-    window.open(
+    const opened = window.open(
       `https://api.whatsapp.com/send?text=${encodeURIComponent(lines.join("\n"))}`,
-      "_blank"
+      "_blank",
+      "noopener,noreferrer"
     );
+    if (opened) opened.opener = null;
   }
 
   return (
     <button
+      type="button"
       onClick={share}
       className="rounded-lg border border-emerald-700 px-2.5 py-1 text-xs font-medium text-emerald-700 hover:bg-emerald-50"
     >
-      💬 Share
+      Share
     </button>
   );
 }

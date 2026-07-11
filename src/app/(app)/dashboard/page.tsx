@@ -2,18 +2,21 @@ import { createClient } from "@/lib/mongodb/server";
 import { DashboardProductSearch } from "@/components/DashboardProductSearch";
 import { ShareLowStockButton } from "@/components/ShareLowStockButton";
 import type { BatchStockRow, StockRow } from "@/lib/types";
+import Link from "next/link";
+import { indiaStartOfDayIso } from "@/lib/date";
 
 export const dynamic = "force-dynamic";
 
 export default async function DashboardPage() {
   const supabase = await createClient();
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = indiaStartOfDayIso();
   const [
     { data: stockRows },
     { data: lowStock },
     { data: recentMovements },
     { data: todaySales },
+    { data: todayReturns },
     { data: expiring },
   ] = await Promise.all([
     supabase.from("current_stock").select("*").eq("is_active", true),
@@ -24,6 +27,7 @@ export default async function DashboardPage() {
       .order("created_at", { ascending: false })
       .limit(8),
     supabase.from("sales").select("grand_total").gte("created_at", today),
+    supabase.from("sale_returns").select("total").gte("created_at", today),
     supabase
       .from("expiring_stock")
       .select("*")
@@ -36,10 +40,15 @@ export default async function DashboardPage() {
   const totalProducts = rows.length;
   const totalValue = rows.reduce((sum, r) => sum + Number(r.stock_value), 0);
   const lowCount = lowStock?.length ?? 0;
-  const todayTotal = ((todaySales ?? []) as { grand_total: number }[]).reduce(
-    (sum, s) => sum + Number(s.grand_total),
-    0
-  );
+  const todayTotal =
+    ((todaySales ?? []) as { grand_total: number }[]).reduce(
+      (sum, sale) => sum + Number(sale.grand_total),
+      0
+    ) -
+    ((todayReturns ?? []) as { total: number }[]).reduce(
+      (sum, saleReturn) => sum + Number(saleReturn.total),
+      0
+    );
   const recentMovementRows = (recentMovements ?? []) as {
     created_at: string;
     id: string;
@@ -64,13 +73,22 @@ export default async function DashboardPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-stone-900">Dashboard</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-xl font-semibold text-stone-950">Dashboard</h1>
+          <p className="mt-1 text-sm text-stone-500">Today&apos;s sales, stock health, and recent movement</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Link href="/purchases/new" className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50">New purchase</Link>
+          <Link href="/sales/new" className="rounded-md bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800">New sale</Link>
+        </div>
+      </div>
 
       <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {stats.map((s) => (
           <div
             key={s.label}
-            className={`rounded-2xl border bg-white p-4 ${
+            className={`rounded-lg border bg-white p-4 ${
               s.alert ? "border-red-300" : "border-stone-200"
             }`}
           >
@@ -90,7 +108,7 @@ export default async function DashboardPage() {
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
         {/* Low stock list */}
-        <section className="rounded-2xl border border-stone-200 bg-white">
+        <section className="rounded-lg border border-stone-200 bg-white">
           <div className="flex items-center justify-between border-b border-stone-100 px-4 py-3">
             <h2 className="text-sm font-semibold text-stone-900">
               Low stock alerts
@@ -134,10 +152,10 @@ export default async function DashboardPage() {
 
         {/* Expiring soon */}
         {expiringRows.length > 0 && (
-          <section className="rounded-2xl border border-amber-300 bg-white">
+          <section className="rounded-lg border border-amber-300 bg-white">
             <div className="border-b border-stone-100 px-4 py-3">
               <h2 className="text-sm font-semibold text-stone-900">
-                ⏳ Expiring soon (60 days)
+                Expiring soon (60 days)
               </h2>
             </div>
             <ul className="divide-y divide-stone-100">
@@ -182,7 +200,7 @@ export default async function DashboardPage() {
         )}
 
         {/* Recent movements */}
-        <section className="rounded-2xl border border-stone-200 bg-white">
+        <section className="rounded-lg border border-stone-200 bg-white">
           <div className="border-b border-stone-100 px-4 py-3">
             <h2 className="text-sm font-semibold text-stone-900">
               Recent activity

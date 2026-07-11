@@ -1,6 +1,6 @@
 // Minimal service worker — PWA install + static asset caching.
 // Offline data-entry queue pachhi na upgrade ma aavshe.
-const CACHE = "inventory-static-v1";
+const CACHE = "inventory-static-v2";
 
 self.addEventListener("install", () => self.skipWaiting());
 

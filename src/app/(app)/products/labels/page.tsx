@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import JsBarcode from "jsbarcode";
+import { PageHeader } from "@/components/DashboardUI";
 import { createClient } from "@/lib/mongodb/client";
 import type { StockRow } from "@/lib/types";
 
@@ -102,22 +103,32 @@ export default function LabelsPage() {
         }
       `}</style>
 
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between print:hidden">
-        <h1 className="text-xl font-semibold text-stone-900">Print labels</h1>
-        <button
-          onClick={() => window.print()}
-          disabled={totalLabels === 0}
-          className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
-        >
-          🖨 Print {totalLabels > 0 ? `(${totalLabels})` : ""}
-        </button>
+      <div className="print:hidden">
+        <PageHeader
+          title="Print labels"
+          description="Select products and the number of barcode labels to print."
+          actions={
+            <button
+              type="button"
+              onClick={() => window.print()}
+              disabled={totalLabels === 0}
+              className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
+            >
+              Print {totalLabels > 0 ? `(${totalLabels})` : ""}
+            </button>
+          }
+        />
       </div>
 
       <div className="mt-4 grid gap-4 lg:grid-cols-2 print:hidden">
         {/* PRODUCT SELECTION */}
-        <section className="rounded-2xl border border-stone-200 bg-white">
+        <section className="rounded-lg border border-stone-200 bg-white">
           <div className="border-b border-stone-100 p-3">
+            <label htmlFor="label-product-search" className="sr-only">
+              Search products
+            </label>
             <input
+              id="label-product-search"
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -152,14 +163,19 @@ export default function LabelsPage() {
                   </div>
                   <div className="ml-3 flex shrink-0 items-center gap-1">
                     <button
+                      type="button"
+                      aria-label={`Decrease label copies for ${p.name}`}
                       onClick={() => setCopies(p.product_id, copies - 1)}
                       className="h-8 w-8 rounded-lg border border-stone-300 text-stone-700 hover:bg-stone-50"
                     >
                       −
                     </button>
                     <input
+                      aria-label={`Label copies for ${p.name}`}
                       type="number"
                       inputMode="numeric"
+                      min="0"
+                      max="99"
                       value={copies || ""}
                       onChange={(e) =>
                         setCopies(p.product_id, parseInt(e.target.value) || 0)
@@ -168,6 +184,8 @@ export default function LabelsPage() {
                       className="h-8 w-12 rounded-lg border border-stone-300 text-center text-sm"
                     />
                     <button
+                      type="button"
+                      aria-label={`Increase label copies for ${p.name}`}
                       onClick={() => setCopies(p.product_id, copies + 1)}
                       className="h-8 w-8 rounded-lg border border-stone-300 text-stone-700 hover:bg-stone-50"
                     >
@@ -186,7 +204,7 @@ export default function LabelsPage() {
         </section>
 
         {/* PREVIEW NOTE */}
-        <section className="rounded-2xl border border-stone-200 bg-white p-5">
+        <section className="rounded-lg border border-stone-200 bg-white p-5">
           <h2 className="text-sm font-semibold text-stone-900">Preview</h2>
           <p className="mt-1 text-xs text-stone-500">
             Niche je labels dekhay che e j print thashe — A4 sheet par 3
@@ -222,7 +240,7 @@ export default function LabelsPage() {
           </div>
         ))}
         {totalLabels === 0 && (
-          <p className="col-span-full rounded-2xl border border-dashed border-stone-300 py-10 text-center text-sm text-stone-400 print:hidden">
+          <p className="col-span-full rounded-lg border border-dashed border-stone-300 py-10 text-center text-sm text-stone-400 print:hidden">
             Products select karo — labels ahi preview thashe
           </p>
         )}

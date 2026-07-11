@@ -34,6 +34,7 @@ export default function StockPage() {
   const [locStock, setLocStock] = useState<LocationStockRow[]>([]);
   const [batchOptions, setBatchOptions] = useState<BatchStockRow[]>([]);
   const [busy, setBusy] = useState(false);
+  const [activePanel, setActivePanel] = useState<"entry" | "history" | "transfer">("entry");
   const [message, setMessage] = useState<{
     kind: "ok" | "err";
     text: string;
@@ -172,7 +173,7 @@ export default function StockPage() {
     }
     const qty = Number(form.quantity);
     if (
-      !Number.isInteger(qty) ||
+      !Number.isFinite(qty) ||
       (form.type === "adjustment" ? qty < 0 : qty <= 0)
     ) {
       setMessage({ kind: "err", text: "Valid quantity nakho" });
@@ -242,8 +243,8 @@ export default function StockPage() {
       setTransferMsg({ kind: "err", text: "From ane To location alag hovi joie" });
       return;
     }
-    const qty = parseInt(transfer.quantity, 10);
-    if (!qty || qty <= 0) {
+    const qty = Number(transfer.quantity);
+    if (!Number.isFinite(qty) || qty <= 0) {
       setTransferMsg({ kind: "err", text: "Valid quantity nakho" });
       return;
     }
@@ -262,7 +263,7 @@ export default function StockPage() {
       setTransferMsg({ kind: "err", text: error.message });
       return;
     }
-    setTransferMsg({ kind: "ok", text: "Transfer thai gayu ✓" });
+    setTransferMsg({ kind: "ok", text: "Transfer completed" });
     setTransfer((t) => ({ ...t, quantity: "" }));
     loadProducts();
     loadMovements();
@@ -274,20 +275,49 @@ export default function StockPage() {
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-stone-900">Stock</h1>
+      <div>
+        <h1 className="text-xl font-semibold text-stone-950">Stock</h1>
+        <p className="mt-1 text-sm text-stone-500">
+          Adjust quantities, transfer inventory, and review movement history
+        </p>
+      </div>
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-5">
-        <div className="space-y-4 lg:col-span-2">
+      <div className="mt-5 flex max-w-full overflow-x-auto border-b border-stone-300" role="tablist" aria-label="Stock workspace">
+        {([
+          { id: "entry" as const, label: "Adjust stock" },
+          ...(locations.length > 1 ? [{ id: "transfer" as const, label: "Transfer" }] : []),
+          { id: "history" as const, label: "History" },
+        ]).map((panel) => (
+          <button
+            key={panel.id}
+            type="button"
+            role="tab"
+            aria-selected={activePanel === panel.id}
+            onClick={() => setActivePanel(panel.id)}
+            className={`shrink-0 border-b-2 px-4 py-2.5 text-sm font-medium ${
+              activePanel === panel.id
+                ? "border-emerald-700 text-emerald-800"
+                : "border-transparent text-stone-500 hover:text-stone-900"
+            }`}
+          >
+            {panel.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="mt-4">
+        <div className="space-y-4">
           {/* MANUAL ENTRY FORM */}
-          <section className="rounded-2xl border border-stone-200 bg-white p-5">
+          <section className={`${activePanel === "entry" ? "block" : "hidden"} max-w-2xl rounded-lg border border-stone-200 bg-white p-5`}>
             <h2 className="text-sm font-semibold text-stone-900">
               Manual entry
             </h2>
 
             <div className="mt-3 space-y-3">
               <div>
-                <label className={label}>Product</label>
+                <label htmlFor="stock-product" className={label}>Product</label>
                 <select
+                  id="stock-product"
                   className={input}
                   value={form.product_id}
                   onChange={(e) =>
@@ -312,8 +342,9 @@ export default function StockPage() {
 
               {locations.length > 1 && (
                 <div>
-                  <label className={label}>Location</label>
+                  <label htmlFor="stock-location" className={label}>Location</label>
                   <select
+                    id="stock-location"
                     className={input}
                     value={form.location_id}
                     onChange={(e) =>
@@ -335,7 +366,9 @@ export default function StockPage() {
                 <div className="grid grid-cols-3 gap-2">
                   {(["in", "out", "adjustment"] as MovementType[]).map((t) => (
                     <button
+                      type="button"
                       key={t}
+                      aria-pressed={form.type === t}
                       onClick={() => setForm((f) => ({ ...f, type: t, batch_id: "" }))}
                       className={`rounded-lg py-2 text-sm font-medium capitalize transition-colors ${
                         form.type === t
@@ -354,7 +387,7 @@ export default function StockPage() {
               </div>
 
               <div>
-                <label className={label}>
+                <label htmlFor="stock-quantity" className={label}>
                   {form.type === "adjustment" ? "Set stock to" : "Quantity"}
                   {form.type === "adjustment" && (
                     <span className="ml-1 font-normal text-stone-400">
@@ -363,9 +396,11 @@ export default function StockPage() {
                   )}
                 </label>
                 <input
+                  id="stock-quantity"
                   type="number"
-                  inputMode="numeric"
-                  min={form.type === "adjustment" ? "0" : "1"}
+                  inputMode="decimal"
+                  min={form.type === "adjustment" ? "0" : "0.001"}
+                  step="any"
                   className={input}
                   value={form.quantity}
                   onChange={(e) =>
@@ -379,13 +414,14 @@ export default function StockPage() {
                 <>
                   <div className="grid grid-cols-2 gap-2">
                     <div>
-                      <label className={label}>
+                      <label htmlFor="stock-batch-number" className={label}>
                         Batch no{" "}
                         <span className="font-normal text-stone-400">
                           (optional)
                         </span>
                       </label>
                       <input
+                        id="stock-batch-number"
                         className={input}
                         value={form.batch_no}
                         onChange={(e) =>
@@ -395,8 +431,9 @@ export default function StockPage() {
                       />
                     </div>
                     <div>
-                      <label className={label}>Expiry</label>
+                      <label htmlFor="stock-expiry" className={label}>Expiry</label>
                       <input
+                        id="stock-expiry"
                         type="date"
                         className={input}
                         value={form.expiry_date}
@@ -408,8 +445,9 @@ export default function StockPage() {
                     </div>
                   </div>
                   <div>
-                    <label className={label}>Supplier (optional)</label>
+                    <label htmlFor="stock-supplier" className={label}>Supplier (optional)</label>
                     <select
+                      id="stock-supplier"
                       className={input}
                       value={form.supplier_id}
                       onChange={(e) =>
@@ -429,13 +467,14 @@ export default function StockPage() {
 
               {form.type === "out" && batchOptions.length > 0 && (
                 <div>
-                  <label className={label}>
+                  <label htmlFor="stock-batch" className={label}>
                     Batch{" "}
                     <span className="font-normal text-stone-400">
                       (optional — FEFO order)
                     </span>
                   </label>
                   <select
+                    id="stock-batch"
                     className={input}
                     value={form.batch_id}
                     onChange={(e) =>
@@ -456,8 +495,9 @@ export default function StockPage() {
               )}
 
               <div>
-                <label className={label}>Reason (optional)</label>
+                <label htmlFor="stock-reason" className={label}>Reason (optional)</label>
                 <input
+                  id="stock-reason"
                   className={input}
                   value={form.reason}
                   onChange={(e) =>
@@ -473,6 +513,7 @@ export default function StockPage() {
 
               {message && (
                 <p
+                  role={message.kind === "err" ? "alert" : "status"}
                   className={`rounded-lg px-3 py-2 text-sm ${
                     message.kind === "ok"
                       ? "bg-emerald-50 text-emerald-800"
@@ -484,6 +525,7 @@ export default function StockPage() {
               )}
 
               <button
+                type="button"
                 onClick={handleSubmit}
                 disabled={busy}
                 className="w-full rounded-lg bg-emerald-700 py-2.5 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50 transition-colors"
@@ -495,29 +537,34 @@ export default function StockPage() {
 
           {/* TRANSFER */}
           {locations.length > 1 && (
-            <section className="rounded-2xl border border-stone-200 bg-white p-5">
+            <section className={`${activePanel === "transfer" ? "block" : "hidden"} max-w-2xl rounded-lg border border-stone-200 bg-white p-5`}>
               <h2 className="text-sm font-semibold text-stone-900">
-                🔁 Transfer between locations
+                Transfer between locations
               </h2>
               <div className="mt-3 space-y-3">
-                <select
-                  className={input}
-                  value={transfer.product_id}
-                  onChange={(e) =>
-                    setTransfer((t) => ({ ...t, product_id: e.target.value }))
-                  }
-                >
-                  <option value="">— Select product —</option>
-                  {products.map((p) => (
-                    <option key={p.product_id} value={p.product_id}>
-                      {p.name}
-                    </option>
-                  ))}
-                </select>
+                <div>
+                  <label htmlFor="transfer-product" className={label}>Product</label>
+                  <select
+                    id="transfer-product"
+                    className={input}
+                    value={transfer.product_id}
+                    onChange={(e) =>
+                      setTransfer((t) => ({ ...t, product_id: e.target.value }))
+                    }
+                  >
+                    <option value="">— Select product —</option>
+                    {products.map((p) => (
+                      <option key={p.product_id} value={p.product_id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   <div>
-                    <label className={label}>From</label>
+                    <label htmlFor="transfer-from" className={label}>From</label>
                     <select
+                      id="transfer-from"
                       className={input}
                       value={transfer.from_location}
                       onChange={(e) =>
@@ -535,8 +582,9 @@ export default function StockPage() {
                     </select>
                   </div>
                   <div>
-                    <label className={label}>To</label>
+                    <label htmlFor="transfer-to" className={label}>To</label>
                     <select
+                      id="transfer-to"
                       className={input}
                       value={transfer.to_location}
                       onChange={(e) =>
@@ -557,18 +605,24 @@ export default function StockPage() {
                     </select>
                   </div>
                 </div>
-                <input
-                  type="number"
-                  inputMode="numeric"
-                  className={input}
-                  value={transfer.quantity}
-                  onChange={(e) =>
-                    setTransfer((t) => ({ ...t, quantity: e.target.value }))
-                  }
-                  placeholder="Quantity"
-                />
+                <div>
+                  <label htmlFor="transfer-quantity" className={label}>Quantity</label>
+                  <input
+                    id="transfer-quantity"
+                    type="number"
+                    inputMode="decimal"
+                    min="0.001"
+                    step="any"
+                    className={input}
+                    value={transfer.quantity}
+                    onChange={(e) =>
+                      setTransfer((t) => ({ ...t, quantity: e.target.value }))
+                    }
+                  />
+                </div>
                 {transferMsg && (
                   <p
+                    role={transferMsg.kind === "err" ? "alert" : "status"}
                     className={`rounded-lg px-3 py-2 text-sm ${
                       transferMsg.kind === "ok"
                         ? "bg-emerald-50 text-emerald-800"
@@ -579,6 +633,7 @@ export default function StockPage() {
                   </p>
                 )}
                 <button
+                  type="button"
                   onClick={handleTransfer}
                   disabled={busy}
                   className="w-full rounded-lg border border-emerald-700 py-2.5 text-sm font-medium text-emerald-700 hover:bg-emerald-50 disabled:opacity-50"
@@ -591,7 +646,7 @@ export default function StockPage() {
         </div>
 
         {/* MOVEMENT HISTORY */}
-        <section className="rounded-2xl border border-stone-200 bg-white lg:col-span-3">
+        <section className={`${activePanel === "history" ? "block" : "hidden"} rounded-lg border border-stone-200 bg-white`}>
           <div className="border-b border-stone-100 px-4 py-3">
             <h2 className="text-sm font-semibold text-stone-900">
               Recent movements (last 50)

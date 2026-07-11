@@ -6,10 +6,10 @@ import { executeRpc } from "@/lib/mongodb/data";
 export async function POST(request: Request) {
   const user = await getCurrentUserFromCookieStore(await cookies());
   if (!user) {
-    return NextResponse.json({
-      data: null,
-      error: { message: "Not authenticated" },
-    });
+    return NextResponse.json(
+      { data: null, error: { message: "Not authenticated" } },
+      { status: 401 }
+    );
   }
 
   const body = await request.json().catch(() => ({}));

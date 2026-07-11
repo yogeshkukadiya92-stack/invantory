@@ -140,6 +140,10 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
       setError("Ochha ma ochhi 1 item add karo");
       return;
     }
+    if (discountNum < 0 || discountNum > subtotal + taxTotal) {
+      setError("Discount 0 thi invoice subtotal sudhi hovu joie");
+      return;
+    }
     for (const line of lines) {
       if (!line.product_id) {
         setError(`"${line.name}" product valid nathi`);
@@ -203,19 +207,22 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
       )}
 
       <div className="relative mt-4">
-        <input
+        <label className="block">
+          <span className="sr-only">Search products</span>
+          <input
           ref={searchRef}
           className="w-full rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Product add karva search karo..."
           disabled={hasReturns}
-        />
+          />
+        </label>
         {results.length > 0 && (
-          <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg">
+          <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-stone-200 bg-white shadow-lg">
             {results.map((product) => (
               <li key={product.product_id}>
-                <button onClick={() => addProduct(product)} className="flex w-full justify-between px-4 py-2.5 text-left text-sm hover:bg-stone-50">
+                <button type="button" onClick={() => addProduct(product)} className="flex w-full justify-between px-4 py-2.5 text-left text-sm hover:bg-stone-50">
                   <span>{product.name}</span>
                   <span className="text-stone-500">Stock {product.stock}</span>
                 </button>
@@ -225,8 +232,8 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
         )}
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-2xl border border-stone-200 bg-white">
-        <table className="w-full text-sm">
+      <div className="mt-4 overflow-x-auto rounded-lg border border-stone-200 bg-white">
+        <table className="w-full min-w-[620px] text-sm">
           <thead>
             <tr className="border-b border-stone-100 bg-stone-50 text-left text-xs text-stone-500">
               <th className="px-4 py-2 font-medium">Item</th>
@@ -244,14 +251,14 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
                 <tr key={line.product_id || line.name}>
                   <td className="px-4 py-2 font-medium text-stone-900">{line.name}</td>
                   <td className="px-2 py-2 text-right">
-                    <input className="w-20 rounded-lg border border-stone-300 px-2 py-1.5 text-right" value={line.quantity} disabled={hasReturns} onChange={(e) => updateLine(line.product_id, "quantity", e.target.value)} />
+                    <input type="number" inputMode="decimal" min="0.001" step="any" aria-label={`Quantity for ${line.name}`} className="w-20 rounded-lg border border-stone-300 px-2 py-1.5 text-right" value={line.quantity} disabled={hasReturns} onChange={(e) => updateLine(line.product_id, "quantity", e.target.value)} />
                   </td>
                   <td className="px-2 py-2 text-right">
-                    <input className="w-24 rounded-lg border border-stone-300 px-2 py-1.5 text-right" value={line.price} disabled={hasReturns} onChange={(e) => updateLine(line.product_id, "price", e.target.value)} />
+                    <input type="number" inputMode="decimal" min="0" step="0.01" aria-label={`Price for ${line.name}`} className="w-24 rounded-lg border border-stone-300 px-2 py-1.5 text-right" value={line.price} disabled={hasReturns} onChange={(e) => updateLine(line.product_id, "price", e.target.value)} />
                   </td>
                   <td className="px-2 py-2 text-right font-medium">{inr(qty * price)}</td>
                   <td className="px-2 py-2 text-right">
-                    <button disabled={hasReturns} onClick={() => setLines((prev) => prev.filter((item) => item.product_id !== line.product_id))} className="text-stone-400 hover:text-red-600 disabled:opacity-40">
+                    <button type="button" aria-label={`Remove ${line.name}`} disabled={hasReturns} onClick={() => setLines((prev) => prev.filter((item) => item.product_id !== line.product_id))} className="text-stone-400 hover:text-red-600 disabled:opacity-40">
                       Remove
                     </button>
                   </td>
@@ -263,37 +270,37 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
       </div>
 
       <div className="mt-4 grid gap-4 sm:grid-cols-2">
-        <div className="rounded-2xl border border-stone-200 bg-white p-4">
-          <label className="text-xs font-medium text-stone-500">Customer</label>
-          <select className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
+        <div className="rounded-lg border border-stone-200 bg-white p-4">
+          <label htmlFor="edit-sale-customer" className="text-xs font-medium text-stone-500">Customer</label>
+          <select id="edit-sale-customer" disabled={hasReturns} className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm disabled:bg-stone-100" value={customerId} onChange={(e) => setCustomerId(e.target.value)}>
             <option value="">Walk-in customer</option>
             {customers.map((customer) => (
               <option key={customer.id} value={customer.id}>{customer.name}</option>
             ))}
           </select>
-          <label className="mt-3 block text-xs font-medium text-stone-500">Note</label>
-          <input className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" value={note} onChange={(e) => setNote(e.target.value)} />
+          <label htmlFor="edit-sale-note" className="mt-3 block text-xs font-medium text-stone-500">Note</label>
+          <input id="edit-sale-note" disabled={hasReturns} className="mt-1 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm disabled:bg-stone-100" value={note} onChange={(e) => setNote(e.target.value)} />
         </div>
-        <div className="rounded-2xl border border-stone-200 bg-white p-4">
+        <div className="rounded-lg border border-stone-200 bg-white p-4">
           <div className="flex justify-between text-sm"><span>Subtotal</span><span>{inr(subtotal)}</span></div>
           <div className="mt-1 flex justify-between text-sm"><span>GST</span><span>{inr(taxTotal)}</span></div>
           <div className="mt-2 flex items-center justify-between text-sm">
             <span>Discount</span>
-            <input className="w-24 rounded-lg border border-stone-300 px-2 py-1.5 text-right" value={discount} onChange={(e) => setDiscount(e.target.value)} />
+            <input type="number" inputMode="decimal" min="0" max={subtotal + taxTotal} step="0.01" disabled={hasReturns} aria-label="Discount" className="w-24 rounded-lg border border-stone-300 px-2 py-1.5 text-right disabled:bg-stone-100" value={discount} onChange={(e) => setDiscount(e.target.value)} />
           </div>
           <div className="mt-2 flex justify-between border-t border-stone-200 pt-2 font-semibold"><span>Total</span><span>{inr(grandTotal)}</span></div>
           <div className="mt-2 flex items-center justify-between text-sm">
             <span>Paid</span>
-            <input className="w-28 rounded-lg border border-stone-300 px-2 py-1.5 text-right" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} />
+            <input type="number" inputMode="decimal" min="0" max={grandTotal} step="0.01" disabled={hasReturns} aria-label="Paid amount" className="w-28 rounded-lg border border-stone-300 px-2 py-1.5 text-right disabled:bg-stone-100" value={paidAmount} onChange={(e) => setPaidAmount(e.target.value)} />
           </div>
-          <select className="mt-3 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
+          <select aria-label="Payment method" disabled={hasReturns} className="mt-3 w-full rounded-lg border border-stone-300 px-3 py-2 text-sm disabled:bg-stone-100" value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value)}>
             {["cash", "upi", "card", "credit"].map((method) => <option key={method} value={method}>{method}</option>)}
           </select>
         </div>
       </div>
 
       {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      <button onClick={save} disabled={saving || hasReturns} className="mt-4 w-full rounded-xl bg-emerald-700 py-3 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50">
+      <button type="button" onClick={save} disabled={saving || hasReturns} className="mt-4 w-full rounded-lg bg-emerald-700 py-3 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50">
         {saving ? "Saving..." : "Save sale changes"}
       </button>
     </div>

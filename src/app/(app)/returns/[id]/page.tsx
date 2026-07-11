@@ -96,14 +96,15 @@ export default function ReturnDetailPage({
           ← {sale?.invoice_no ?? "Sales"}
         </Link>
         <button
+          type="button"
           onClick={() => window.print()}
           className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
         >
-          🖨 Print credit note
+          Print credit note
         </button>
       </div>
 
-      <div className="invoice-card mt-4 rounded-2xl border border-stone-200 bg-white p-6">
+      <div className="invoice-card mt-4 rounded-lg border border-stone-200 bg-white p-6">
         <div className="flex items-start justify-between border-b border-stone-200 pb-4">
           <div>
             <h2 className="text-lg font-bold text-stone-900">
@@ -204,6 +205,12 @@ export default function ReturnDetailPage({
             <span>SGST</span>
             <span>{inr(Number(ret.tax_total) / 2)}</span>
           </div>
+          {Number(ret.discount ?? 0) > 0 && (
+            <div className="flex justify-between text-stone-600">
+              <span>Invoice discount</span>
+              <span>−{inr(Number(ret.discount))}</span>
+            </div>
+          )}
           <div className="flex justify-between border-t border-stone-200 pt-1.5 text-base font-bold text-amber-700">
             <span>Total refund</span>
             <span>{inr(ret.total)}</span>

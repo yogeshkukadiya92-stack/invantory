@@ -3,6 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import * as XLSX from "xlsx";
+import { PageHeader } from "@/components/DashboardUI";
 import { createClient } from "@/lib/mongodb/client";
 import type { Category } from "@/lib/types";
 
@@ -14,6 +15,8 @@ interface ImportRow {
   unit: string;
   purchase_price: number;
   selling_price: number;
+  mrp: number | null;
+  weight_grams: number | null;
   min_stock_level: number;
   hsn_code: string | null;
   gst_rate: number;
@@ -29,6 +32,8 @@ const TEMPLATE_COLUMNS = [
   "Unit",
   "Purchase price",
   "Selling price",
+  "MRP",
+  "Weight (grams)",
   "Min stock",
   "HSN code",
   "GST rate",
@@ -61,17 +66,31 @@ export default function ImportProductsPage() {
     setResult(null);
     setFileName(file.name);
 
-    const buf = await file.arrayBuffer();
-    const wb = XLSX.read(buf);
-    const ws = wb.Sheets[wb.SheetNames[0]];
-    const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
-      defval: "",
-    });
-
-    if (raw.length === 0) {
-      setError("File ma koi rows nathi");
+    if (file.size > 10 * 1024 * 1024) {
+      setError("File 10 MB karta nani hovi joie");
+      setRows([]);
       return;
     }
+
+    try {
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(buf);
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      if (!ws) throw new Error("Workbook ma sheet nathi");
+      const raw = XLSX.utils.sheet_to_json<Record<string, unknown>>(ws, {
+        defval: "",
+      });
+
+      if (raw.length === 0) {
+        setError("File ma koi rows nathi");
+        setRows([]);
+        return;
+      }
+      if (raw.length > 5000) {
+        setError("Ek file ma vadhu ma vadhu 5,000 rows import karo");
+        setRows([]);
+        return;
+      }
 
     // Column names case-insensitive match karo
     const norm = (obj: Record<string, unknown>, key: string) => {
@@ -98,12 +117,29 @@ export default function ImportProductsPage() {
         unit: norm(r, "Unit") || "pcs",
         purchase_price: num(r, "Purchase price"),
         selling_price: num(r, "Selling price"),
+        mrp: norm(r, "MRP") ? num(r, "MRP") : null,
+        weight_grams: norm(r, "Weight (grams)") ? num(r, "Weight (grams)") : null,
         min_stock_level: num(r, "Min stock"),
         hsn_code: norm(r, "HSN code") || null,
         gst_rate: num(r, "GST rate"),
         opening_stock: num(r, "Opening stock"),
       };
+      const numericFields = [
+        "Purchase price",
+        "Selling price",
+        "MRP",
+        "Weight (grams)",
+        "Min stock",
+        "GST rate",
+        "Opening stock",
+      ];
+      const invalidNumericField = numericFields.find((field) => {
+        const value = norm(r, field);
+        return value !== "" && (!Number.isFinite(Number(value)) || Number(value) < 0);
+      });
       if (!row.name) row.error = "Name khali che";
+      else if (invalidNumericField) row.error = `${invalidNumericField} valid nathi`;
+      else if (row.gst_rate > 100) row.error = "GST rate 100 karta vadhu na hoi shake";
       else if (row.barcode && seenBarcodes.has(row.barcode))
         row.error = "File ma duplicate barcode";
       else if (row.sku && seenSkus.has(row.sku))
@@ -146,7 +182,15 @@ export default function ImportProductsPage() {
         row.error = "SKU already database ma che";
     }
 
-    setRows(parsed);
+      setRows(parsed);
+    } catch (fileError) {
+      setRows([]);
+      setError(
+        fileError instanceof Error
+          ? `File read nathi thai: ${fileError.message}`
+          : "File read nathi thai"
+      );
+    }
   }
 
   async function runImport() {
@@ -158,15 +202,6 @@ export default function ImportProductsPage() {
     }
     setImporting(true);
     setError(null);
-
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
-    if (!user) {
-      setError("Your session expired. Please sign in again before importing.");
-      setImporting(false);
-      return;
-    }
 
     // Categories: name → id map; missing categories banavva try karo
     const { data: cats } = await supabase.from("categories").select("*");
@@ -196,10 +231,8 @@ export default function ImportProductsPage() {
       const chunk = valid.slice(i, i + CHUNK);
       setProgress(`Importing ${i + 1}–${Math.min(i + CHUNK, valid.length)} of ${valid.length}...`);
 
-      const { data: inserted, error } = await supabase
-        .from("products")
-        .insert(
-          chunk.map((r) => ({
+      const { error } = await supabase.rpc("import_products", {
+        p_products: chunk.map((r) => ({
             name: r.name,
             sku: r.sku,
             barcode: r.barcode,
@@ -209,12 +242,14 @@ export default function ImportProductsPage() {
             unit: r.unit,
             purchase_price: r.purchase_price,
             selling_price: r.selling_price,
+            mrp: r.mrp,
+            weight_grams: r.weight_grams,
             min_stock_level: r.min_stock_level,
             hsn_code: r.hsn_code,
             gst_rate: r.gst_rate,
-          }))
-        )
-        .select("id, barcode, sku, name");
+            opening_stock: r.opening_stock,
+          })),
+      });
 
       if (error) {
         setError(`Row ${i + 1} pase error: ${error.message}`);
@@ -223,39 +258,6 @@ export default function ImportProductsPage() {
         return;
       }
 
-      // Opening stock movements
-      const movements = ((inserted ?? []) as {
-        barcode: string | null;
-        id: string;
-        name: string;
-        sku: string | null;
-      }[]).flatMap((p) => {
-        const src = chunk.find(
-          (r) =>
-            (r.barcode && r.barcode === p.barcode) ||
-            (r.sku && r.sku === p.sku) ||
-            r.name === p.name
-        );
-        if (!src || src.opening_stock <= 0) return [];
-        return [
-          {
-            product_id: p.id,
-            type: "in" as const,
-            quantity: src.opening_stock,
-            reason: "Opening stock (import)",
-            created_by: user.id,
-          },
-        ];
-      });
-
-      if (movements.length > 0) {
-        const { error: mvError } = await supabase
-          .from("stock_movements")
-          .insert(movements);
-        if (mvError) {
-          setError(`Opening stock error: ${mvError.message}`);
-        }
-      }
       imported += chunk.length;
     }
 
@@ -271,20 +273,21 @@ export default function ImportProductsPage() {
 
   return (
     <div className="mx-auto max-w-4xl">
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <h1 className="text-xl font-semibold text-stone-900">
-          Bulk import products
-        </h1>
-        <Link
-          href="/products"
-          className="text-sm text-stone-500 hover:text-stone-700"
-        >
-          ← Products
-        </Link>
-      </div>
+      <PageHeader
+        title="Bulk import products"
+        description="Validate a spreadsheet before creating products and opening stock."
+        actions={
+          <Link
+            href="/products"
+            className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
+          >
+            Back to products
+          </Link>
+        }
+      />
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <div className="rounded-2xl border border-stone-200 bg-white p-5">
+        <section className="rounded-lg border border-stone-200 bg-white p-5">
           <h2 className="text-sm font-semibold text-stone-900">
             Step 1: Template download karo
           </h2>
@@ -293,14 +296,15 @@ export default function ImportProductsPage() {
             baki optional.
           </p>
           <button
+            type="button"
             onClick={downloadTemplate}
             className="mt-3 rounded-lg border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
           >
-            ⬇ Download template
+            Download template
           </button>
-        </div>
+        </section>
 
-        <div className="rounded-2xl border border-stone-200 bg-white p-5">
+        <section className="rounded-lg border border-stone-200 bg-white p-5">
           <h2 className="text-sm font-semibold text-stone-900">
             Step 2: File upload karo
           </h2>
@@ -308,7 +312,7 @@ export default function ImportProductsPage() {
             .xlsx athva .csv — preview joine pachhi import thase
           </p>
           <label className="mt-3 inline-block cursor-pointer rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800">
-            📂 Choose file
+            Choose file
             <input
               type="file"
               accept=".xlsx,.xls,.csv"
@@ -323,7 +327,7 @@ export default function ImportProductsPage() {
           {fileName && (
             <p className="mt-2 text-xs text-stone-500">{fileName}</p>
           )}
-        </div>
+        </section>
       </div>
 
       {error && (
@@ -334,7 +338,7 @@ export default function ImportProductsPage() {
 
       {result && (
         <div className="mt-3 rounded-lg bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          ✓ {result.imported} products import thaya
+          {result.imported} products import thaya
           {result.skipped > 0 && ` · ${result.skipped} skip thaya (errors)`}
           {" — "}
           <Link href="/products" className="font-medium underline">
@@ -357,17 +361,18 @@ export default function ImportProductsPage() {
               )}
             </p>
             <button
+              type="button"
               onClick={runImport}
               disabled={importing || validCount === 0}
               className="rounded-lg bg-emerald-700 px-5 py-2 text-sm font-medium text-white hover:bg-emerald-800 disabled:opacity-50"
             >
               {importing
                 ? progress || "Importing..."
-                : `⬆ Import ${validCount} products`}
+                : `Import ${validCount} products`}
             </button>
           </div>
 
-          <div className="mt-3 overflow-hidden rounded-2xl border border-stone-200 bg-white">
+          <div className="mt-3 overflow-hidden rounded-lg border border-stone-200 bg-white">
             <div className="max-h-96 overflow-auto">
               <table className="w-full text-sm">
                 <thead className="sticky top-0 bg-stone-50">
@@ -404,7 +409,7 @@ export default function ImportProductsPage() {
                             {r.error}
                           </span>
                         ) : (
-                          <span className="text-emerald-700">✓ OK</span>
+                          <span className="text-emerald-700">Ready</span>
                         )}
                       </td>
                     </tr>

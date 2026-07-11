@@ -181,29 +181,38 @@ export default function EditPurchasePage({ params }: { params: Promise<{ id: str
       )}
 
       <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <select className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-          <option value="">— Supplier select karo —</option>
-          {suppliers.map((supplier) => (
-            <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
-          ))}
-        </select>
-        <input className="rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note" />
+        <label>
+          <span className="sr-only">Supplier</span>
+          <select className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm" value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+            <option value="">— Supplier select karo —</option>
+            {suppliers.map((supplier) => (
+              <option key={supplier.id} value={supplier.id}>{supplier.name}</option>
+            ))}
+          </select>
+        </label>
+        <label>
+          <span className="sr-only">Purchase note</span>
+          <input className="w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm" value={note} onChange={(e) => setNote(e.target.value)} placeholder="Note" />
+        </label>
       </div>
 
       <div className="relative mt-4">
-        <input
+        <label className="block">
+          <span className="sr-only">Search products</span>
+          <input
           ref={searchRef}
           className="w-full rounded-lg border border-stone-300 bg-white px-3 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           placeholder="Product add karva search karo..."
           disabled={po.status === "cancelled"}
-        />
+          />
+        </label>
         {results.length > 0 && (
-          <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-xl border border-stone-200 bg-white shadow-lg">
+          <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-stone-200 bg-white shadow-lg">
             {results.map((product) => (
               <li key={product.product_id}>
-                <button onClick={() => addProduct(product)} className="flex w-full justify-between px-4 py-2.5 text-left text-sm hover:bg-stone-50">
+                <button type="button" onClick={() => addProduct(product)} className="flex w-full justify-between px-4 py-2.5 text-left text-sm hover:bg-stone-50">
                   <span>{product.name}</span>
                   <span className="text-stone-500">Cost ₹{Number(product.purchase_price).toLocaleString("en-IN")}</span>
                 </button>
@@ -213,8 +222,8 @@ export default function EditPurchasePage({ params }: { params: Promise<{ id: str
         )}
       </div>
 
-      <div className="mt-4 overflow-hidden rounded-2xl border border-stone-200 bg-white">
-        <table className="w-full text-sm">
+      <div className="mt-4 overflow-x-auto rounded-lg border border-stone-200 bg-white">
+        <table className="w-full min-w-[620px] text-sm">
           <thead>
             <tr className="border-b border-stone-100 bg-stone-50 text-left text-xs text-stone-500">
               <th className="px-4 py-2 font-medium">Item</th>
@@ -232,14 +241,14 @@ export default function EditPurchasePage({ params }: { params: Promise<{ id: str
                 <tr key={line.product_id || line.name}>
                   <td className="px-4 py-2 font-medium text-stone-900">{line.name}</td>
                   <td className="px-2 py-2 text-right">
-                    <input className="w-20 rounded-lg border border-stone-300 px-2 py-1.5 text-right" value={line.quantity} disabled={po.status === "cancelled"} onChange={(e) => updateLine(line.product_id, "quantity", e.target.value)} />
+                    <input type="number" inputMode="decimal" min="0.001" step="any" aria-label={`Quantity for ${line.name}`} className="w-20 rounded-lg border border-stone-300 px-2 py-1.5 text-right" value={line.quantity} disabled={po.status === "cancelled"} onChange={(e) => updateLine(line.product_id, "quantity", e.target.value)} />
                   </td>
                   <td className="px-2 py-2 text-right">
-                    <input className="w-24 rounded-lg border border-stone-300 px-2 py-1.5 text-right" value={line.cost} disabled={po.status === "cancelled"} onChange={(e) => updateLine(line.product_id, "cost", e.target.value)} />
+                    <input type="number" inputMode="decimal" min="0" step="any" aria-label={`Cost for ${line.name}`} className="w-24 rounded-lg border border-stone-300 px-2 py-1.5 text-right" value={line.cost} disabled={po.status === "cancelled"} onChange={(e) => updateLine(line.product_id, "cost", e.target.value)} />
                   </td>
                   <td className="px-2 py-2 text-right font-medium">{inr(qty * cost)}</td>
                   <td className="px-2 py-2 text-right">
-                    <button disabled={po.status === "cancelled"} onClick={() => setLines((prev) => prev.filter((item) => item.product_id !== line.product_id))} className="text-stone-400 hover:text-red-600 disabled:opacity-40">
+                    <button type="button" aria-label={`Remove ${line.name}`} disabled={po.status === "cancelled"} onClick={() => setLines((prev) => prev.filter((item) => item.product_id !== line.product_id))} className="text-stone-400 hover:text-red-600 disabled:opacity-40">
                       Remove
                     </button>
                   </td>
@@ -250,13 +259,13 @@ export default function EditPurchasePage({ params }: { params: Promise<{ id: str
         </table>
       </div>
 
-      <div className="mt-3 flex justify-between rounded-2xl border border-stone-200 bg-white px-4 py-3 text-base font-bold text-stone-900">
+      <div className="mt-3 flex justify-between rounded-lg border border-stone-200 bg-white px-4 py-3 text-base font-bold text-stone-900">
         <span>Total</span>
         <span>{inr(total)}</span>
       </div>
 
       {error && <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      <button onClick={save} disabled={saving || po.status === "cancelled"} className="mt-4 w-full rounded-xl bg-emerald-700 py-3 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50">
+      <button type="button" onClick={save} disabled={saving || po.status === "cancelled"} className="mt-4 w-full rounded-lg bg-emerald-700 py-3 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50">
         {saving ? "Saving..." : "Save purchase changes"}
       </button>
     </div>

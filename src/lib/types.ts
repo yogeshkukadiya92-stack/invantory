@@ -37,6 +37,8 @@ export interface Product {
   unit: string;
   purchase_price: number;
   selling_price: number;
+  mrp?: number | null;
+  weight_grams?: number | null;
   min_stock_level: number;
   hsn_code: string | null;
   gst_rate: number;
@@ -83,6 +85,7 @@ export interface Sale {
   note: string | null;
   created_by: string;
   created_at: string;
+  location_id?: string | null;
 }
 
 export interface SaleItem {
@@ -111,10 +114,12 @@ export interface SaleReturn {
   sale_id: string;
   reason: string | null;
   subtotal: number;
+  discount?: number;
   tax_total: number;
   total: number;
   created_by: string;
   created_at: string;
+  location_id?: string | null;
 }
 
 export interface SaleReturnItem {
@@ -128,6 +133,7 @@ export interface SaleReturnItem {
   price: number;
   gst_rate: number;
   line_total: number;
+  cost?: number | null;
 }
 
 export type POStatus = "ordered" | "received" | "cancelled";
@@ -142,6 +148,7 @@ export interface PurchaseOrder {
   created_by: string;
   created_at: string;
   received_at: string | null;
+  location_id?: string | null;
 }
 
 export interface PurchaseOrderItem {
@@ -217,6 +224,8 @@ export interface StockRow {
   min_stock_level: number;
   selling_price: number;
   purchase_price: number;
+  mrp?: number | null;
+  weight_grams?: number | null;
   category_id: string | null;
   is_active: boolean;
   stock: number;

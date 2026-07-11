@@ -3,6 +3,7 @@
 import { use, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { PageHeader } from "@/components/DashboardUI";
 import { createClient } from "@/lib/mongodb/client";
 import type { Location, Sale, SaleItem } from "@/lib/types";
 
@@ -28,25 +29,42 @@ export default function SaleReturnPage({
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [previouslyRefunded, setPreviouslyRefunded] = useState(0);
 
   useEffect(() => {
     async function load() {
-      const [{ data: s }, { data: li }, { data: locs }] = await Promise.all([
+      const [{ data: s }, { data: li }, { data: locs }, { data: saleMovements }] = await Promise.all([
         supabase.from("sales").select("*").eq("id", id).single(),
         supabase.from("sale_items").select("*").eq("sale_id", id),
         supabase.from("locations").select("*").order("name"),
+        supabase
+          .from("stock_movements")
+          .select("location_id")
+          .eq("sale_id", id)
+          .eq("type", "out")
+          .limit(1),
       ]);
-      setSale(s as Sale | null);
+      const saleData = s as Sale | null;
+      setSale(saleData);
 
       const saleItems = (li ?? []) as SaleItem[];
       // Dar item ma thi pehla ketlu return thai gayu che
-      const { data: prevReturns } = await supabase
-        .from("sale_return_items")
-        .select("sale_item_id, quantity")
-        .in(
-          "sale_item_id",
-          saleItems.map((it) => it.id)
-        );
+      const [{ data: prevReturns }, { data: previousReturnRows }] = await Promise.all([
+        supabase
+          .from("sale_return_items")
+          .select("sale_item_id, quantity")
+          .in(
+            "sale_item_id",
+            saleItems.map((it) => it.id)
+          ),
+        supabase.from("sale_returns").select("total").eq("sale_id", id),
+      ]);
+      setPreviouslyRefunded(
+        ((previousReturnRows ?? []) as Array<{ total: number }>).reduce(
+          (sum, previousReturn) => sum + Number(previousReturn.total),
+          0
+        )
+      );
       const returnedMap = new Map<string, number>();
       for (const r of prevReturns ?? []) {
         returnedMap.set(
@@ -65,7 +83,14 @@ export default function SaleReturnPage({
 
       const locList = (locs ?? []) as Location[];
       setLocations(locList);
-      const def = locList.find((l) => l.is_default) ?? locList[0];
+      const movementLocation = (
+        (saleMovements ?? []) as Array<{ location_id?: string | null }>
+      )[0]?.location_id;
+      const saleLocationId = saleData?.location_id ?? movementLocation;
+      const def =
+        locList.find((location) => location.id === saleLocationId) ??
+        locList.find((location) => location.is_default) ??
+        locList[0];
       if (def) setLocationId(def.id);
       setLoading(false);
     }
@@ -91,7 +116,20 @@ export default function SaleReturnPage({
         100,
     0
   );
-  const refundTotal = refundSubtotal + refundTax;
+  const grossRefund = refundSubtotal + refundTax;
+  const saleGross = sale ? Number(sale.subtotal) + Number(sale.tax_total) : 0;
+  const refundDiscount =
+    saleGross > 0
+      ? Math.round((grossRefund * Number(sale?.discount ?? 0) * 100) / saleGross) / 100
+      : 0;
+  const refundableBalance = Math.max(
+    0,
+    Number(sale?.grand_total ?? 0) - previouslyRefunded
+  );
+  const refundTotal = Math.min(
+    Math.round((grossRefund - refundDiscount) * 100) / 100,
+    Math.round(refundableBalance * 100) / 100
+  );
 
   async function saveReturn() {
     if (saving) return;
@@ -150,38 +188,36 @@ export default function SaleReturnPage({
 
   return (
     <div className="mx-auto max-w-2xl">
-      <div className="flex flex-col items-start gap-3 sm:flex-row sm:items-center sm:justify-between">
-        <Link
-          href={`/sales/${id}`}
-          className="text-sm text-stone-500 hover:text-stone-700"
-        >
-          ← {sale.invoice_no}
-        </Link>
-        {locations.length > 1 && (
-          <select
-            className={input}
-            value={locationId}
-            onChange={(e) => setLocationId(e.target.value)}
-            title="Stock kya pacho aavshe"
-          >
-            {locations.map((l) => (
-              <option key={l.id} value={l.id}>
-                📍 {l.name}
-              </option>
-            ))}
-          </select>
-        )}
-      </div>
+      <PageHeader
+        title={`Return items · ${sale.invoice_no}`}
+        description="Returned quantities are restored to stock and recorded on a credit note."
+        actions={
+          <>
+            {locations.length > 1 && (
+              <select
+                aria-label="Return stock location"
+                className={input}
+                value={locationId}
+                onChange={(e) => setLocationId(e.target.value)}
+              >
+                {locations.map((location) => (
+                  <option key={location.id} value={location.id}>
+                    {location.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            <Link
+              href={`/sales/${id}`}
+              className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
+            >
+              Cancel
+            </Link>
+          </>
+        }
+      />
 
-      <h1 className="mt-3 text-xl font-semibold text-stone-900">
-        Return items — {sale.invoice_no}
-      </h1>
-      <p className="mt-1 text-sm text-stone-500">
-        Return karva ni quantity nakho. Stock pacho &apos;in&apos; thashe ane
-        credit note banshe.
-      </p>
-
-      <div className="mt-4 overflow-hidden rounded-2xl border border-stone-200 bg-white">
+      <div className="mt-4 overflow-hidden rounded-lg border border-stone-200 bg-white">
         <div className="overflow-x-auto">
         <table className="w-full min-w-[520px] text-sm">
           <thead>
@@ -211,10 +247,12 @@ export default function SaleReturnPage({
                   <td className="px-2 py-2 text-right text-stone-700">{max}</td>
                   <td className="px-2 py-2 text-right">
                     <input
+                      aria-label={`Return quantity for ${it.product_name}`}
                       type="number"
                       inputMode="decimal"
                       min={0}
                       max={max}
+                      step="any"
                       disabled={max <= 0}
                       className={`${input} w-20 text-right`}
                       value={it.returnQty}
@@ -230,15 +268,21 @@ export default function SaleReturnPage({
         </div>
       </div>
 
-      <input
-        className={`${input} mt-3 w-full`}
-        value={reason}
-        onChange={(e) => setReason(e.target.value)}
-        placeholder="Reason (e.g. damaged, wrong item)"
-      />
+      <div className="mt-3">
+        <label htmlFor="return-reason" className="mb-1 block text-xs font-medium text-stone-600">
+          Return reason (optional)
+        </label>
+        <input
+          id="return-reason"
+          className={`${input} w-full`}
+          value={reason}
+          onChange={(e) => setReason(e.target.value)}
+          placeholder="Damaged, wrong item, or another reason"
+        />
+      </div>
 
       {selected.length > 0 && (
-        <div className="mt-3 rounded-2xl border border-stone-200 bg-white p-4 text-sm">
+        <div className="mt-3 rounded-lg border border-stone-200 bg-white p-4 text-sm">
           <div className="flex justify-between text-stone-600">
             <span>Refund subtotal</span>
             <span>{inr(refundSubtotal)}</span>
@@ -247,6 +291,12 @@ export default function SaleReturnPage({
             <span>GST</span>
             <span>{inr(refundTax)}</span>
           </div>
+          {refundDiscount > 0 && (
+            <div className="mt-1 flex justify-between text-stone-600">
+              <span>Invoice discount</span>
+              <span>−{inr(refundDiscount)}</span>
+            </div>
+          )}
           <div className="mt-2 flex justify-between border-t border-stone-200 pt-2 font-semibold text-stone-900">
             <span>Total refund</span>
             <span>{inr(refundTotal)}</span>
@@ -261,11 +311,12 @@ export default function SaleReturnPage({
       )}
 
       <button
+        type="button"
         onClick={saveReturn}
         disabled={saving || selected.length === 0}
         className="mt-4 w-full rounded-xl bg-amber-600 py-3.5 text-base font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
       >
-        {saving ? "Saving..." : `↩ Create credit note — ${inr(refundTotal)}`}
+        {saving ? "Saving..." : `Create credit note · ${inr(refundTotal)}`}
       </button>
     </div>
   );

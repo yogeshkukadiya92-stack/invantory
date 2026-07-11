@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { createClient } from "@/lib/mongodb/client";
 import type {
   AllowedEmail,
@@ -11,554 +11,622 @@ import type {
   Role,
   Supplier,
 } from "@/lib/types";
+import {
+  ActionMenu,
+  ConfirmDialog,
+  EmptyState,
+  LoadingState,
+  Modal,
+  PageHeader,
+  menuItemClass,
+  useToast,
+} from "@/components/DashboardUI";
+
+type SettingsTab = "business" | "catalog" | "locations" | "team";
+type EditorKind = "category" | "invite" | "location" | "supplier";
+
+interface EditorState {
+  address: string;
+  email: string;
+  id?: string;
+  kind: EditorKind;
+  name: string;
+  phone: string;
+}
+
+interface DeleteState {
+  id: string;
+  kind: EditorKind;
+  label: string;
+}
+
+const emptyBusiness = {
+  address: "",
+  gstin: "",
+  invoice_prefix: "INV",
+  name: "",
+  phone: "",
+};
+
+const inputClass =
+  "w-full rounded-md border border-stone-300 bg-white px-3 py-2.5 text-sm focus:border-emerald-600 focus:outline-none";
+const labelClass = "mb-1 block text-sm font-medium text-stone-700";
 
 export default function SettingsPage() {
   const supabase = createClient();
-
+  const { showToast } = useToast();
+  const [activeTab, setActiveTab] = useState<SettingsTab>("business");
   const [categories, setCategories] = useState<Category[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
-  const [newCategory, setNewCategory] = useState("");
-  const [newSupplier, setNewSupplier] = useState({ name: "", phone: "" });
-  const [error, setError] = useState<string | null>(null);
-
+  const [locations, setLocations] = useState<Location[]>([]);
   const [me, setMe] = useState<Profile | null>(null);
   const [team, setTeam] = useState<Profile[]>([]);
   const [invites, setInvites] = useState<AllowedEmail[]>([]);
-  const [newInvite, setNewInvite] = useState("");
+  const [business, setBusiness] = useState(emptyBusiness);
+  const [businessBaseline, setBusinessBaseline] = useState(JSON.stringify(emptyBusiness));
+  const [editor, setEditor] = useState<EditorState | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<DeleteState | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  const [locations, setLocations] = useState<Location[]>([]);
-  const [newLocation, setNewLocation] = useState("");
-
-  const [biz, setBiz] = useState({
-    name: "",
-    address: "",
-    phone: "",
-    gstin: "",
-    invoice_prefix: "INV",
-  });
-  const [bizSaved, setBizSaved] = useState(false);
+  const friendly = useCallback((message: string) => {
+    if (message.includes("admin role")) return "Aa action mate admin role joie";
+    if (message.includes("duplicate") || message.includes("E11000")) {
+      return "Aa value already exist kare che";
+    }
+    if (message.includes("purchase history")) {
+      return "Aa supplier ni purchase history che, etle delete nathi thai shakta";
+    }
+    if (message.includes("foreign key")) {
+      return "Aa location par stock history che, etle delete nathi thai shakti";
+    }
+    return message;
+  }, []);
 
   const load = useCallback(async () => {
-    const {
-      data: { user },
-    } = await supabase.auth.getUser();
+    setLoading(true);
+    setError(null);
+    const authResult = await supabase.auth.getUser();
+    const user = authResult.data?.user as { id?: string; role?: Role } | null;
+    const admin = user?.role === "admin";
+    const [categoryResult, supplierResult, profileResult, businessResult, locationResult, inviteResult] =
+      await Promise.all([
+        supabase.from("categories").select("*").order("name"),
+        supabase.from("suppliers").select("*").order("name"),
+        supabase.from("profiles").select("*").order("created_at"),
+        supabase.from("business_settings").select("*").eq("id", 1).single(),
+        supabase.from("locations").select("*").order("name"),
+        admin
+          ? supabase.from("allowed_emails").select("*").order("created_at")
+          : Promise.resolve({ data: [], error: null }),
+      ]);
 
-    const [
-      { data: cats },
-      { data: sups },
-      { data: profiles },
-      { data: inv },
-      { data: bs },
-      { data: locs },
-    ] = await Promise.all([
-      supabase.from("categories").select("*").order("name"),
-      supabase.from("suppliers").select("*").order("name"),
-      supabase.from("profiles").select("*").order("created_at"),
-      // Staff mate RLS aa query block kare che — error ignore
-      supabase.from("allowed_emails").select("*").order("created_at"),
-      supabase.from("business_settings").select("*").eq("id", 1).single(),
-      supabase.from("locations").select("*").order("name"),
-    ]);
-    setLocations((locs ?? []) as Location[]);
-    const bsRow = bs as BusinessSettings | null;
-    if (bsRow) {
-      setBiz({
-        name: bsRow.name,
-        address: bsRow.address,
-        phone: bsRow.phone,
-        gstin: bsRow.gstin,
-        invoice_prefix: bsRow.invoice_prefix,
-      });
+    const loadError =
+      categoryResult.error ??
+      supplierResult.error ??
+      profileResult.error ??
+      businessResult.error ??
+      locationResult.error ??
+      inviteResult.error;
+    if (loadError) setError(friendly(loadError.message));
+
+    setCategories((categoryResult.data ?? []) as Category[]);
+    setSuppliers((supplierResult.data ?? []) as Supplier[]);
+    setLocations((locationResult.data ?? []) as Location[]);
+    const profiles = (profileResult.data ?? []) as Profile[];
+    setTeam(profiles);
+    setMe(profiles.find((profile) => profile.id === user?.id) ?? null);
+    setInvites((inviteResult.data ?? []) as AllowedEmail[]);
+    const row = businessResult.data as BusinessSettings | null;
+    if (row) {
+      const nextBusiness = {
+        address: row.address,
+        gstin: row.gstin,
+        invoice_prefix: row.invoice_prefix,
+        name: row.name,
+        phone: row.phone,
+      };
+      setBusiness(nextBusiness);
+      setBusinessBaseline(JSON.stringify(nextBusiness));
     }
-    setCategories((cats ?? []) as Category[]);
-    setSuppliers((sups ?? []) as Supplier[]);
-    const all = (profiles ?? []) as Profile[];
-    setTeam(all);
-    setMe(all.find((p) => p.id === user?.id) ?? null);
-    setInvites((inv ?? []) as AllowedEmail[]);
-  }, [supabase]);
+    if (!admin) setActiveTab("catalog");
+    setLoading(false);
+  }, [friendly, supabase]);
 
   useEffect(() => {
     load();
   }, [load]);
 
-  function friendly(message: string) {
-    if (message.includes("row-level security"))
-      return "Aa action mate admin role joie";
-    if (message.includes("duplicate")) return "Aa name already exist kare che";
-    return message;
-  }
-
   const isAdmin = me?.role === "admin";
+  const businessDirty = JSON.stringify(business) !== businessBaseline;
 
-  async function addCategory() {
-    if (!newCategory.trim()) return;
+  const tabs = useMemo(
+    () =>
+      [
+        isAdmin ? { id: "business" as const, label: "Business" } : null,
+        { id: "catalog" as const, label: "Catalog" },
+        { id: "locations" as const, label: "Locations" },
+        isAdmin ? { id: "team" as const, label: "Team & access" } : null,
+      ].filter((tab): tab is { id: SettingsTab; label: string } => tab !== null),
+    [isAdmin]
+  );
+
+  function openEditor(kind: EditorKind, record?: Category | Supplier | Location) {
     setError(null);
-    const { error } = await supabase
-      .from("categories")
-      .insert({ name: newCategory.trim() });
-    if (error) return setError(friendly(error.message));
-    setNewCategory("");
-    load();
-  }
-
-  async function deleteCategory(id: string) {
-    if (!confirm("Category delete karvi che? Products ma thi remove thai jashe."))
+    if (kind === "category") {
+      const category = record as Category | undefined;
+      setEditor({ address: "", email: "", id: category?.id, kind, name: category?.name ?? "", phone: "" });
       return;
-    setError(null);
-    const { error } = await supabase.from("categories").delete().eq("id", id);
-    if (error) return setError(friendly(error.message));
-    load();
+    }
+    if (kind === "supplier") {
+      const supplier = record as Supplier | undefined;
+      setEditor({
+        address: supplier?.address ?? "",
+        email: "",
+        id: supplier?.id,
+        kind,
+        name: supplier?.name ?? "",
+        phone: supplier?.phone ?? "",
+      });
+      return;
+    }
+    if (kind === "location") {
+      const location = record as Location | undefined;
+      setEditor({ address: "", email: "", id: location?.id, kind, name: location?.name ?? "", phone: "" });
+      return;
+    }
+    setEditor({ address: "", email: "", kind, name: "", phone: "" });
   }
 
-  async function addSupplier() {
-    if (!newSupplier.name.trim()) return;
+  async function saveEditor() {
+    if (!editor || saving) return;
+    setSaving(true);
     setError(null);
-    const { error } = await supabase.from("suppliers").insert({
-      name: newSupplier.name.trim(),
-      phone: newSupplier.phone.trim() || null,
+    let result: { error: { message: string } | null };
+    if (editor.kind === "invite") {
+      const email = editor.email.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        setError("Valid email nakho");
+        setSaving(false);
+        return;
+      }
+      result = await supabase.from("allowed_emails").insert({ email });
+    } else {
+      const name = editor.name.trim();
+      if (!name) {
+        setError("Name jaruri che");
+        setSaving(false);
+        return;
+      }
+      const table =
+        editor.kind === "category"
+          ? "categories"
+          : editor.kind === "supplier"
+            ? "suppliers"
+            : "locations";
+      const payload =
+        editor.kind === "supplier"
+          ? { address: editor.address.trim() || null, name, phone: editor.phone.trim() || null }
+          : { name };
+      result = editor.id
+        ? await supabase.from(table).update(payload).eq("id", editor.id)
+        : await supabase.from(table).insert(payload);
+    }
+    setSaving(false);
+    if (result.error) {
+      setError(friendly(result.error.message));
+      return;
+    }
+    const message = editor.id ? "Changes saved" : editor.kind === "invite" ? "Invitation added" : "Record added";
+    setEditor(null);
+    await load();
+    showToast(message);
+  }
+
+  async function runDelete() {
+    if (!deleteTarget || saving) return;
+    setSaving(true);
+    setError(null);
+    const table =
+      deleteTarget.kind === "category"
+        ? "categories"
+        : deleteTarget.kind === "supplier"
+          ? "suppliers"
+          : deleteTarget.kind === "location"
+            ? "locations"
+            : "allowed_emails";
+    const column = deleteTarget.kind === "invite" ? "email" : "id";
+    const { error: deleteError } = await supabase
+      .from(table)
+      .delete()
+      .eq(column, deleteTarget.id);
+    setSaving(false);
+    if (deleteError) {
+      setError(friendly(deleteError.message));
+      setDeleteTarget(null);
+      return;
+    }
+    setDeleteTarget(null);
+    await load();
+    showToast("Record removed");
+  }
+
+  async function makeDefaultLocation(location: Location) {
+    if (saving) return;
+    setSaving(true);
+    setError(null);
+    const { error: rpcError } = await supabase.rpc("set_default_location", {
+      p_location_id: location.id,
     });
-    if (error) return setError(friendly(error.message));
-    setNewSupplier({ name: "", phone: "" });
-    load();
+    setSaving(false);
+    if (rpcError) {
+      setError(friendly(rpcError.message));
+      return;
+    }
+    await load();
+    showToast(`${location.name} is now the default location`);
   }
 
-  async function deleteSupplier(id: string) {
-    if (!confirm("Supplier delete karvo che?")) return;
+  async function changeRole(profile: Profile, role: Role) {
+    if (saving || profile.role === role) return;
+    setSaving(true);
     setError(null);
-    const { error } = await supabase.from("suppliers").delete().eq("id", id);
-    if (error) return setError(friendly(error.message));
-    load();
-  }
-
-  // ---------- TEAM (admin only) ----------
-  async function changeRole(id: string, role: Role) {
-    setError(null);
-    const { error } = await supabase
+    const { error: roleError } = await supabase
       .from("profiles")
       .update({ role })
-      .eq("id", id);
-    if (error) return setError(friendly(error.message));
-    load();
-  }
-
-  async function addInvite() {
-    const email = newInvite.trim().toLowerCase();
-    if (!email || !email.includes("@")) {
-      setError("Valid email nakho");
+      .eq("id", profile.id);
+    setSaving(false);
+    if (roleError) {
+      setError(friendly(roleError.message));
       return;
     }
-    setError(null);
-    const { error } = await supabase
-      .from("allowed_emails")
-      .insert({ email, added_by: me?.id });
-    if (error) return setError(friendly(error.message));
-    setNewInvite("");
-    load();
-  }
-
-  async function removeInvite(email: string) {
-    setError(null);
-    const { error } = await supabase
-      .from("allowed_emails")
-      .delete()
-      .eq("email", email);
-    if (error) return setError(friendly(error.message));
-    load();
-  }
-
-  async function addLocation() {
-    if (!newLocation.trim()) return;
-    setError(null);
-    const { error } = await supabase
-      .from("locations")
-      .insert({ name: newLocation.trim() });
-    if (error) return setError(friendly(error.message));
-    setNewLocation("");
-    load();
-  }
-
-  async function makeDefaultLocation(id: string) {
-    setError(null);
-    const { error: e1 } = await supabase
-      .from("locations")
-      .update({ is_default: false })
-      .eq("is_default", true);
-    if (e1) return setError(friendly(e1.message));
-    const { error: e2 } = await supabase
-      .from("locations")
-      .update({ is_default: true })
-      .eq("id", id);
-    if (e2) return setError(friendly(e2.message));
-    load();
-  }
-
-  async function deleteLocation(id: string) {
-    if (!confirm("Location delete karvi che?")) return;
-    setError(null);
-    const { error } = await supabase.from("locations").delete().eq("id", id);
-    if (error) {
-      return setError(
-        error.message.includes("violates foreign key")
-          ? "Aa location par stock entries che — delete nathi thai shakti"
-          : friendly(error.message)
-      );
-    }
-    load();
+    await load();
+    showToast(`${profile.full_name || "Team member"} is now ${role}`);
   }
 
   async function saveBusiness() {
+    if (saving || !businessDirty) return;
+    setSaving(true);
     setError(null);
-    setBizSaved(false);
-    const { error } = await supabase
+    const { error: saveError } = await supabase
       .from("business_settings")
       .update({
-        name: biz.name.trim(),
-        address: biz.address.trim(),
-        phone: biz.phone.trim(),
-        gstin: biz.gstin.trim(),
-        invoice_prefix: biz.invoice_prefix.trim() || "INV",
-        updated_at: new Date().toISOString(),
+        address: business.address.trim(),
+        gstin: business.gstin.trim(),
+        invoice_prefix: business.invoice_prefix.trim() || "INV",
+        name: business.name.trim(),
+        phone: business.phone.trim(),
       })
       .eq("id", 1);
-    if (error) return setError(friendly(error.message));
-    setBizSaved(true);
-    setTimeout(() => setBizSaved(false), 2500);
+    setSaving(false);
+    if (saveError) {
+      setError(friendly(saveError.message));
+      return;
+    }
+    setBusinessBaseline(JSON.stringify(business));
+    showToast("Business profile saved");
   }
 
-  const input =
-    "rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600";
+  const editorTitle = editor
+    ? `${editor.id ? "Edit" : "Add"} ${
+        editor.kind === "invite" ? "invitation" : editor.kind
+      }`
+    : "Edit";
 
   return (
     <div>
-      <h1 className="text-xl font-semibold text-stone-900">Settings</h1>
+      <PageHeader
+        title="Settings"
+        description={
+          isAdmin
+            ? "Business, catalog, locations, and team access"
+            : "Catalog and location reference information"
+        }
+      />
 
-      {error && (
-        <p className="mt-3 rounded-lg bg-red-50 px-3 py-2 text-sm text-red-700">
-          {error}
-        </p>
+      {error && !editor && (
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <span>{error}</span>
+          <button type="button" onClick={() => setError(null)} className="font-semibold underline">
+            Dismiss
+          </button>
+        </div>
       )}
 
-      {/* BUSINESS PROFILE — admin only, invoice par aave che */}
-      {isAdmin && (
-        <section className="mt-4 rounded-2xl border border-stone-200 bg-white p-5">
-          <h2 className="text-sm font-semibold text-stone-900">
-            Business profile
-          </h2>
-          <p className="mt-1 text-xs text-stone-500">
-            Aa details GST invoice na header ma aave che
-          </p>
-          <div className="mt-3 grid gap-3 sm:grid-cols-2">
-            <input
-              className={input}
-              placeholder="Business name"
-              value={biz.name}
-              onChange={(e) => setBiz((b) => ({ ...b, name: e.target.value }))}
-            />
-            <input
-              className={input}
-              placeholder="Phone"
-              value={biz.phone}
-              onChange={(e) => setBiz((b) => ({ ...b, phone: e.target.value }))}
-            />
-            <input
-              className={input}
-              placeholder="GSTIN"
-              value={biz.gstin}
-              onChange={(e) => setBiz((b) => ({ ...b, gstin: e.target.value }))}
-            />
-            <input
-              className={input}
-              placeholder="Invoice prefix (e.g. INV)"
-              value={biz.invoice_prefix}
-              onChange={(e) =>
-                setBiz((b) => ({ ...b, invoice_prefix: e.target.value }))
-              }
-            />
-            <textarea
-              className={`${input} sm:col-span-2`}
-              rows={2}
-              placeholder="Address"
-              value={biz.address}
-              onChange={(e) =>
-                setBiz((b) => ({ ...b, address: e.target.value }))
-              }
-            />
-          </div>
-          <div className="mt-3 flex items-center gap-3">
-            <button
-              onClick={saveBusiness}
-              className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
-            >
-              Save
-            </button>
-            {bizSaved && (
-              <span className="text-sm text-emerald-700">✓ Saved</span>
-            )}
-          </div>
-        </section>
-      )}
-
-      <div className="mt-4 grid gap-4 lg:grid-cols-2">
-        {/* CATEGORIES */}
-        <section className="rounded-2xl border border-stone-200 bg-white p-5">
-          <h2 className="text-sm font-semibold text-stone-900">Categories</h2>
-          {isAdmin && (
-            <div className="mt-3 flex gap-2">
-              <input
-                className={`${input} flex-1`}
-                value={newCategory}
-                onChange={(e) => setNewCategory(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addCategory()}
-                placeholder="New category name"
-              />
-              <button
-                onClick={addCategory}
-                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
-              >
-                Add
-              </button>
-            </div>
-          )}
-          <ul className="mt-3 divide-y divide-stone-100">
-            {categories.map((c) => (
-              <li
-                key={c.id}
-                className="flex items-center justify-between py-2.5"
-              >
-                <span className="text-sm text-stone-800">{c.name}</span>
-                {isAdmin && (
-                  <button
-                    onClick={() => deleteCategory(c.id)}
-                    className="text-xs text-red-500 hover:text-red-700"
-                  >
-                    Delete
-                  </button>
-                )}
-              </li>
-            ))}
-            {categories.length === 0 && (
-              <li className="py-3 text-sm text-stone-500">No categories yet</li>
-            )}
-          </ul>
-        </section>
-
-        {/* SUPPLIERS */}
-        <section className="rounded-2xl border border-stone-200 bg-white p-5">
-          <h2 className="text-sm font-semibold text-stone-900">Suppliers</h2>
-          {isAdmin && (
-            <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-              <input
-                className={`${input} flex-1`}
-                value={newSupplier.name}
-                onChange={(e) =>
-                  setNewSupplier((s) => ({ ...s, name: e.target.value }))
-                }
-                placeholder="Supplier name"
-              />
-              <input
-                className={`${input} sm:w-36`}
-                value={newSupplier.phone}
-                onChange={(e) =>
-                  setNewSupplier((s) => ({ ...s, phone: e.target.value }))
-                }
-                placeholder="Phone"
-              />
-              <button
-                onClick={addSupplier}
-                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
-              >
-                Add
-              </button>
-            </div>
-          )}
-          <ul className="mt-3 divide-y divide-stone-100">
-            {suppliers.map((s) => (
-              <li
-                key={s.id}
-                className="flex items-center justify-between py-2.5"
-              >
-                <div>
-                  <span className="text-sm text-stone-800">{s.name}</span>
-                  {s.phone && (
-                    <span className="ml-2 text-xs text-stone-500">
-                      {s.phone}
-                    </span>
-                  )}
-                </div>
-                {isAdmin && (
-                  <button
-                    onClick={() => deleteSupplier(s.id)}
-                    className="text-xs text-red-500 hover:text-red-700"
-                  >
-                    Delete
-                  </button>
-                )}
-              </li>
-            ))}
-            {suppliers.length === 0 && (
-              <li className="py-3 text-sm text-stone-500">No suppliers yet</li>
-            )}
-          </ul>
-        </section>
-
-        {/* LOCATIONS */}
-        <section className="rounded-2xl border border-stone-200 bg-white p-5">
-          <h2 className="text-sm font-semibold text-stone-900">Locations</h2>
-          <p className="mt-1 text-xs text-stone-500">
-            Godown / store / branch — stock location-wise track thay che
-          </p>
-          {isAdmin && (
-            <div className="mt-3 flex gap-2">
-              <input
-                className={`${input} flex-1`}
-                value={newLocation}
-                onChange={(e) => setNewLocation(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addLocation()}
-                placeholder="e.g. Godown 2"
-              />
-              <button
-                onClick={addLocation}
-                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
-              >
-                Add
-              </button>
-            </div>
-          )}
-          <ul className="mt-3 divide-y divide-stone-100">
-            {locations.map((l) => (
-              <li
-                key={l.id}
-                className="flex items-center justify-between py-2.5"
-              >
-                <span className="text-sm text-stone-800">
-                  {l.name}
-                  {l.is_default && (
-                    <span className="ml-2 rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-medium text-emerald-700">
-                      default
-                    </span>
-                  )}
-                </span>
-                {isAdmin && !l.is_default && (
-                  <span className="flex gap-3">
-                    <button
-                      onClick={() => makeDefaultLocation(l.id)}
-                      className="text-xs text-emerald-700 hover:underline"
-                    >
-                      Make default
-                    </button>
-                    <button
-                      onClick={() => deleteLocation(l.id)}
-                      className="text-xs text-red-500 hover:text-red-700"
-                    >
-                      Delete
-                    </button>
-                  </span>
-                )}
-              </li>
-            ))}
-            {locations.length === 0 && (
-              <li className="py-3 text-sm text-stone-500">
-                No locations yet — upgrade SQL run karo
-              </li>
-            )}
-          </ul>
-        </section>
-
-        {/* TEAM — admin only */}
-        {isAdmin && (
-          <section className="rounded-2xl border border-stone-200 bg-white p-5">
-            <h2 className="text-sm font-semibold text-stone-900">Team</h2>
-            <p className="mt-1 text-xs text-stone-500">
-              Staff scan + stock entry kari shake. Admin badhu kari shake.
-            </p>
-            <ul className="mt-3 divide-y divide-stone-100">
-              {team.map((p) => (
-                <li
-                  key={p.id}
-                  className="flex items-center justify-between py-2.5"
-                >
-                  <span className="text-sm text-stone-800">
-                    {p.full_name || "(no name)"}
-                    {p.id === me?.id && (
-                      <span className="ml-2 text-xs text-stone-400">you</span>
-                    )}
-                  </span>
-                  {p.id === me?.id ? (
-                    <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-medium text-emerald-700">
-                      {p.role}
-                    </span>
-                  ) : (
-                    <select
-                      className="rounded-lg border border-stone-300 bg-white px-2 py-1 text-xs"
-                      value={p.role}
-                      onChange={(e) => changeRole(p.id, e.target.value as Role)}
-                    >
-                      <option value="staff">staff</option>
-                      <option value="admin">admin</option>
-                    </select>
-                  )}
-                </li>
-              ))}
-            </ul>
-          </section>
-        )}
-
-        {/* INVITES — admin only */}
-        {isAdmin && (
-          <section className="rounded-2xl border border-stone-200 bg-white p-5">
-            <h2 className="text-sm font-semibold text-stone-900">
-              Invited emails
-            </h2>
-            <p className="mt-1 text-xs text-stone-500">
-              Fakt aa list na emails signup kari shakse
-            </p>
-            <div className="mt-3 flex gap-2">
-              <input
-                type="email"
-                className={`${input} flex-1`}
-                value={newInvite}
-                onChange={(e) => setNewInvite(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addInvite()}
-                placeholder="staff@example.com"
-              />
-              <button
-                onClick={addInvite}
-                className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
-              >
-                Invite
-              </button>
-            </div>
-            <ul className="mt-3 divide-y divide-stone-100">
-              {invites.map((i) => (
-                <li
-                  key={i.email}
-                  className="flex items-center justify-between py-2.5"
-                >
-                  <span className="text-sm text-stone-800">{i.email}</span>
-                  <button
-                    onClick={() => removeInvite(i.email)}
-                    className="text-xs text-red-500 hover:text-red-700"
-                  >
-                    Remove
-                  </button>
-                </li>
-              ))}
-              {invites.length === 0 && (
-                <li className="py-3 text-sm text-stone-500">
-                  No invites yet — signup band che
-                </li>
-              )}
-            </ul>
-          </section>
-        )}
+      <div className="mt-5 flex max-w-full overflow-x-auto border-b border-stone-300" role="tablist" aria-label="Settings sections">
+        {tabs.map((tab) => (
+          <button
+            key={tab.id}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab.id}
+            onClick={() => setActiveTab(tab.id)}
+            className={`shrink-0 border-b-2 px-4 py-2.5 text-sm font-medium ${
+              activeTab === tab.id
+                ? "border-emerald-700 text-emerald-800"
+                : "border-transparent text-stone-500 hover:text-stone-900"
+            }`}
+          >
+            {tab.label}
+          </button>
+        ))}
       </div>
 
-      {!isAdmin && (
-        <p className="mt-4 text-xs text-stone-400">
-          Categories, suppliers ane team manage karva admin role joie.
-        </p>
+      {loading ? (
+        <div className="mt-4 rounded-lg border border-stone-200 bg-white">
+          <LoadingState label="Loading settings" />
+        </div>
+      ) : (
+        <>
+          {activeTab === "business" && isAdmin && (
+            <section className="mt-4 rounded-lg border border-stone-200 bg-white p-5">
+              <div className="flex flex-col gap-3 border-b border-stone-100 pb-4 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <h2 className="text-base font-semibold text-stone-950">Business profile</h2>
+                  <p className="mt-1 text-sm text-stone-500">Used on invoices and credit notes.</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={saveBusiness}
+                  disabled={saving || !businessDirty}
+                  className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-40"
+                >
+                  {saving ? "Saving..." : "Save changes"}
+                </button>
+              </div>
+              <div className="mt-5 grid gap-4 sm:grid-cols-2">
+                <div>
+                  <label htmlFor="business-name" className={labelClass}>Business name</label>
+                  <input id="business-name" className={inputClass} value={business.name} onChange={(event) => setBusiness((current) => ({ ...current, name: event.target.value }))} />
+                </div>
+                <div>
+                  <label htmlFor="business-phone" className={labelClass}>Phone</label>
+                  <input id="business-phone" type="tel" className={inputClass} value={business.phone} onChange={(event) => setBusiness((current) => ({ ...current, phone: event.target.value }))} />
+                </div>
+                <div>
+                  <label htmlFor="business-gstin" className={labelClass}>GSTIN</label>
+                  <input id="business-gstin" className={`${inputClass} uppercase`} value={business.gstin} onChange={(event) => setBusiness((current) => ({ ...current, gstin: event.target.value }))} />
+                </div>
+                <div>
+                  <label htmlFor="invoice-prefix" className={labelClass}>Invoice prefix</label>
+                  <input id="invoice-prefix" className={inputClass} value={business.invoice_prefix} onChange={(event) => setBusiness((current) => ({ ...current, invoice_prefix: event.target.value }))} maxLength={20} />
+                </div>
+                <div className="sm:col-span-2">
+                  <label htmlFor="business-address" className={labelClass}>Address</label>
+                  <textarea id="business-address" rows={4} className={inputClass} value={business.address} onChange={(event) => setBusiness((current) => ({ ...current, address: event.target.value }))} />
+                </div>
+              </div>
+            </section>
+          )}
+
+          {activeTab === "catalog" && (
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <section className="rounded-lg border border-stone-200 bg-white">
+                <div className="flex items-center justify-between border-b border-stone-200 px-4 py-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-stone-950">Categories</h2>
+                    <p className="mt-0.5 text-xs text-stone-500">Group products for filtering and reports.</p>
+                  </div>
+                  {isAdmin && (
+                    <button type="button" onClick={() => openEditor("category")} className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50">Add</button>
+                  )}
+                </div>
+                {categories.length === 0 ? (
+                  <EmptyState title="No categories" description="Add a category to organize products." />
+                ) : (
+                  <ul className="divide-y divide-stone-100">
+                    {categories.map((category) => (
+                      <li key={category.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                        <span className="text-sm font-medium text-stone-800">{category.name}</span>
+                        {isAdmin && (
+                          <ActionMenu label={`Actions for ${category.name}`}>
+                            <button type="button" onClick={() => openEditor("category", category)} className={menuItemClass}>Edit</button>
+                            <button type="button" onClick={() => setDeleteTarget({ id: category.id, kind: "category", label: category.name })} className={`${menuItemClass} text-red-700`}>Delete</button>
+                          </ActionMenu>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+
+              <section className="rounded-lg border border-stone-200 bg-white">
+                <div className="flex items-center justify-between border-b border-stone-200 px-4 py-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-stone-950">Suppliers</h2>
+                    <p className="mt-0.5 text-xs text-stone-500">Contacts available on purchase orders.</p>
+                  </div>
+                  {isAdmin && (
+                    <button type="button" onClick={() => openEditor("supplier")} className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50">Add</button>
+                  )}
+                </div>
+                {suppliers.length === 0 ? (
+                  <EmptyState title="No suppliers" description="Add a supplier for purchase orders." />
+                ) : (
+                  <ul className="divide-y divide-stone-100">
+                    {suppliers.map((supplier) => (
+                      <li key={supplier.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-stone-800">{supplier.name}</p>
+                          <p className="truncate text-xs text-stone-500">{supplier.phone || "No phone"}</p>
+                        </div>
+                        {isAdmin && (
+                          <ActionMenu label={`Actions for ${supplier.name}`}>
+                            <button type="button" onClick={() => openEditor("supplier", supplier)} className={menuItemClass}>Edit</button>
+                            <button type="button" onClick={() => setDeleteTarget({ id: supplier.id, kind: "supplier", label: supplier.name })} className={`${menuItemClass} text-red-700`}>Delete</button>
+                          </ActionMenu>
+                        )}
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
+          )}
+
+          {activeTab === "locations" && (
+            <section className="mt-4 rounded-lg border border-stone-200 bg-white">
+              <div className="flex items-center justify-between border-b border-stone-200 px-4 py-3">
+                <div>
+                  <h2 className="text-sm font-semibold text-stone-950">Stock locations</h2>
+                  <p className="mt-0.5 text-xs text-stone-500">Stores, warehouses, and branches used by stock entries.</p>
+                </div>
+                {isAdmin && (
+                  <button type="button" onClick={() => openEditor("location")} className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50">Add location</button>
+                )}
+              </div>
+              {locations.length === 0 ? (
+                <EmptyState title="No locations" description="Add a location before recording stock." />
+              ) : (
+                <ul className="divide-y divide-stone-100">
+                  {locations.map((location) => (
+                    <li key={location.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <span className="truncate text-sm font-medium text-stone-800">{location.name}</span>
+                        {location.is_default && <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-xs font-semibold text-emerald-700">Default</span>}
+                      </div>
+                      {isAdmin && (
+                        <ActionMenu label={`Actions for ${location.name}`}>
+                          <button type="button" onClick={() => openEditor("location", location)} className={menuItemClass}>Edit</button>
+                          {!location.is_default && (
+                            <>
+                              <button type="button" onClick={() => makeDefaultLocation(location)} className={menuItemClass}>Make default</button>
+                              <button type="button" onClick={() => setDeleteTarget({ id: location.id, kind: "location", label: location.name })} className={`${menuItemClass} text-red-700`}>Delete</button>
+                            </>
+                          )}
+                        </ActionMenu>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </section>
+          )}
+
+          {activeTab === "team" && isAdmin && (
+            <div className="mt-4 grid gap-4 lg:grid-cols-2">
+              <section className="rounded-lg border border-stone-200 bg-white">
+                <div className="border-b border-stone-200 px-4 py-3">
+                  <h2 className="text-sm font-semibold text-stone-950">Team members</h2>
+                  <p className="mt-0.5 text-xs text-stone-500">Admins manage settings; staff can run inventory workflows.</p>
+                </div>
+                <ul className="divide-y divide-stone-100">
+                  {team.map((profile) => (
+                    <li key={profile.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-stone-800">{profile.full_name || "Unnamed member"}</p>
+                        {profile.id === me?.id && <p className="text-xs text-stone-500">Current account</p>}
+                      </div>
+                      {profile.id === me?.id ? (
+                        <span className="rounded-full bg-emerald-50 px-2.5 py-1 text-xs font-semibold capitalize text-emerald-700">{profile.role}</span>
+                      ) : (
+                        <select
+                          value={profile.role}
+                          disabled={saving}
+                          onChange={(event) => changeRole(profile, event.target.value as Role)}
+                          aria-label={`Role for ${profile.full_name}`}
+                          className="rounded-md border border-stone-300 bg-white px-2 py-1.5 text-xs capitalize"
+                        >
+                          <option value="staff">Staff</option>
+                          <option value="admin">Admin</option>
+                        </select>
+                      )}
+                    </li>
+                  ))}
+                </ul>
+              </section>
+
+              <section className="rounded-lg border border-stone-200 bg-white">
+                <div className="flex items-center justify-between border-b border-stone-200 px-4 py-3">
+                  <div>
+                    <h2 className="text-sm font-semibold text-stone-950">Invited emails</h2>
+                    <p className="mt-0.5 text-xs text-stone-500">Only invited addresses can create staff accounts.</p>
+                  </div>
+                  <button type="button" onClick={() => openEditor("invite")} className="rounded-md border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50">Invite</button>
+                </div>
+                {invites.length === 0 ? (
+                  <EmptyState title="No pending invitations" description="Add an email when a new team member needs access." />
+                ) : (
+                  <ul className="divide-y divide-stone-100">
+                    {invites.map((invite) => (
+                      <li key={invite.email} className="flex items-center justify-between gap-3 px-4 py-3">
+                        <span className="truncate text-sm text-stone-800">{invite.email}</span>
+                        <ActionMenu label={`Actions for ${invite.email}`}>
+                          <button type="button" onClick={() => setDeleteTarget({ id: invite.email, kind: "invite", label: invite.email })} className={`${menuItemClass} text-red-700`}>Remove invitation</button>
+                        </ActionMenu>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </section>
+            </div>
+          )}
+        </>
       )}
+
+      {!isAdmin && !loading && (
+        <p className="mt-4 text-xs text-stone-500">Catalog and location changes require an administrator.</p>
+      )}
+
+      <Modal
+        open={editor !== null}
+        onClose={() => (saving ? undefined : setEditor(null))}
+        title={editorTitle}
+        description={editor?.kind === "invite" ? "Allow a new staff account to sign up" : "Changes are used across inventory workflows"}
+        size="sm"
+        footer={
+          <>
+            <button type="button" onClick={() => setEditor(null)} disabled={saving} className="rounded-md border border-stone-300 bg-white px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50 disabled:opacity-50">Cancel</button>
+            <button type="button" onClick={saveEditor} disabled={saving} className="rounded-md bg-emerald-700 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-800 disabled:opacity-50">{saving ? "Saving..." : "Save"}</button>
+          </>
+        }
+      >
+        {editor && (
+          <div className="space-y-4">
+            {editor.kind === "invite" ? (
+              <div>
+                <label htmlFor="invite-email" className={labelClass}>Email address</label>
+                <input id="invite-email" type="email" autoFocus className={inputClass} value={editor.email} onChange={(event) => setEditor((current) => current ? { ...current, email: event.target.value } : current)} placeholder="staff@example.com" />
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label htmlFor="editor-name" className={labelClass}>Name</label>
+                  <input id="editor-name" autoFocus className={inputClass} value={editor.name} onChange={(event) => setEditor((current) => current ? { ...current, name: event.target.value } : current)} />
+                </div>
+                {editor.kind === "supplier" && (
+                  <>
+                    <div>
+                      <label htmlFor="supplier-phone" className={labelClass}>Phone</label>
+                      <input id="supplier-phone" type="tel" className={inputClass} value={editor.phone} onChange={(event) => setEditor((current) => current ? { ...current, phone: event.target.value } : current)} />
+                    </div>
+                    <div>
+                      <label htmlFor="supplier-address" className={labelClass}>Address</label>
+                      <textarea id="supplier-address" rows={3} className={inputClass} value={editor.address} onChange={(event) => setEditor((current) => current ? { ...current, address: event.target.value } : current)} />
+                    </div>
+                  </>
+                )}
+              </>
+            )}
+            {error && <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
+          </div>
+        )}
+      </Modal>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        onCancel={() => setDeleteTarget(null)}
+        onConfirm={runDelete}
+        busy={saving}
+        title={`Remove ${deleteTarget?.label ?? "record"}?`}
+        description={
+          deleteTarget?.kind === "category"
+            ? "Products will remain, but this category will be removed from them."
+            : "This record will be removed from future selections. Historical inventory data is protected."
+        }
+        confirmLabel="Remove"
+      />
     </div>
   );
 }

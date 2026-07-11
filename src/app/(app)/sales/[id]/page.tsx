@@ -103,19 +103,22 @@ export default function SaleDetailPage({
           ← Sales
         </Link>
         <div className="flex flex-wrap gap-2">
-          <Link
-            href={`/sales/${sale.id}/edit`}
-            className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
-          >
-            Edit
-          </Link>
+          {returns.length === 0 && (
+            <Link
+              href={`/sales/${sale.id}/edit`}
+              className="rounded-lg border border-stone-300 px-4 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
+            >
+              Edit
+            </Link>
+          )}
           <Link
             href={`/sales/${sale.id}/return`}
             className="rounded-lg border border-amber-600 px-4 py-2 text-sm font-medium text-amber-700 hover:bg-amber-50"
           >
-            ↩ Return
+            Return items
           </Link>
           <button
+            type="button"
             onClick={() => {
               const lines = [
                 `*${business?.name || "Invoice"}*`,
@@ -134,26 +137,29 @@ export default function SaleDetailPage({
               const phoneParam = phone
                 ? `phone=${phone.length === 10 ? "91" + phone : phone}&`
                 : "";
-              window.open(
+              const opened = window.open(
                 `https://api.whatsapp.com/send?${phoneParam}text=${encodeURIComponent(lines.join("\n"))}`,
-                "_blank"
+                "_blank",
+                "noopener,noreferrer"
               );
+              if (opened) opened.opener = null;
             }}
             className="rounded-lg border border-emerald-700 px-4 py-2 text-sm font-medium text-emerald-700 hover:bg-emerald-50"
           >
-            💬 WhatsApp
+            Share on WhatsApp
           </button>
           <button
+            type="button"
             onClick={() => window.print()}
             className="rounded-lg bg-emerald-700 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-800"
           >
-            🖨 Print invoice
+            Print invoice
           </button>
         </div>
       </div>
 
       {/* INVOICE */}
-      <div className="invoice-card mt-4 rounded-2xl border border-stone-200 bg-white p-6">
+      <div className="invoice-card mt-4 rounded-lg border border-stone-200 bg-white p-6">
         {/* Header */}
         <div className="flex items-start justify-between border-b border-stone-200 pb-4">
           <div>
@@ -324,10 +330,10 @@ export default function SaleDetailPage({
 
       {/* RETURNS / CREDIT NOTES */}
       {returns.length > 0 && (
-        <div className="no-print mt-4 rounded-2xl border border-amber-200 bg-white">
+        <div className="no-print mt-4 rounded-lg border border-amber-200 bg-white">
           <div className="border-b border-stone-100 px-4 py-3">
             <h2 className="text-sm font-semibold text-stone-900">
-              ↩ Returns against this invoice
+              Returns against this invoice
             </h2>
           </div>
           <ul className="divide-y divide-stone-100">
