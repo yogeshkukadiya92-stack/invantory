@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/mongodb/client";
 import type { Sale, SaleStatus } from "@/lib/types";
@@ -26,6 +26,7 @@ export default function SalesPage() {
   const [statusFilter, setStatusFilter] = useState<"" | SaleStatus>("");
   const [customerId, setCustomerId] = useState("");
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const [todayTotal, setTodayTotal] = useState(0);
@@ -38,8 +39,16 @@ export default function SalesPage() {
   }, []);
 
   useEffect(() => {
+    const timer = window.setTimeout(
+      () => setDebouncedSearch(search.trim()),
+      300
+    );
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
     setPage(0);
-  }, [customerId, statusFilter]);
+  }, [customerId, debouncedSearch, statusFilter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -53,6 +62,12 @@ export default function SalesPage() {
         .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
       if (statusFilter) query = query.eq("status", statusFilter);
       if (customerId) query = query.eq("customer_id", customerId);
+      if (debouncedSearch) {
+        const safeSearch = debouncedSearch.replace(/[,()]/g, "");
+        query = query.or(
+          `invoice_no.ilike.%${safeSearch}%,customer_name.ilike.%${safeSearch}%,payment_method.ilike.%${safeSearch}%,status.ilike.%${safeSearch}%`
+        );
+      }
 
       const today = indiaStartOfDayIso();
       const monthStart = indiaStartOfMonthIso();
@@ -133,17 +148,7 @@ export default function SalesPage() {
     return () => {
       cancelled = true;
     };
-  }, [customerId, page, statusFilter, supabase]);
-
-  const filteredRows = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return rows;
-    return rows.filter((sale) =>
-      [sale.invoice_no, sale.customers?.name, sale.payment_method, sale.status]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(query))
-    );
-  }, [rows, search]);
+  }, [customerId, debouncedSearch, page, statusFilter, supabase]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const inr = (value: number) =>
@@ -236,20 +241,20 @@ export default function SalesPage() {
 
         {loading ? (
           <LoadingState label="Loading sales" />
-        ) : filteredRows.length === 0 ? (
+        ) : rows.length === 0 ? (
           <EmptyState
-            title={search ? "No matching sales" : "No sales found"}
+            title={debouncedSearch ? "No matching sales" : "No sales found"}
             description={
-              search
+              debouncedSearch
                 ? "Try another invoice number, customer, or payment status."
                 : "Create a sale to generate an invoice and update stock."
             }
-            actionHref={search ? undefined : "/sales/new"}
-            actionLabel={search ? undefined : "Create sale"}
+            actionHref={debouncedSearch ? undefined : "/sales/new"}
+            actionLabel={debouncedSearch ? undefined : "Create sale"}
           />
         ) : (
           <ul className="divide-y divide-stone-100">
-            {filteredRows.map((sale) => (
+            {rows.map((sale) => (
               <li key={sale.id} className="flex items-center gap-2 px-2 py-1.5 sm:px-3">
                 <Link
                   href={`/sales/${sale.id}`}

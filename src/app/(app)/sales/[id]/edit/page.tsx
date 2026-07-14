@@ -39,28 +39,77 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
 
   useEffect(() => {
     async function load() {
-      const [{ data: s }, { data: items }, { data: custs }, { data: returns }] =
+      const [saleResult, itemResult, customerResult, returnResult, movementResult] =
         await Promise.all([
           supabase.from("sales").select("*").eq("id", id).single(),
           supabase.from("sale_items").select("*").eq("sale_id", id),
           supabase.from("customers").select("*").order("name"),
           supabase.from("sale_returns").select("id").eq("sale_id", id).limit(1),
+          supabase
+            .from("stock_movements")
+            .select("location_id")
+            .eq("sale_id", id)
+            .limit(1),
         ]);
-      const saleData = s as Sale | null;
+      const loadError =
+        saleResult.error ??
+        itemResult.error ??
+        customerResult.error ??
+        returnResult.error ??
+        movementResult.error;
+      if (loadError) {
+        setError(loadError.message);
+        setLoading(false);
+        return;
+      }
+      const rawSale = saleResult.data as Sale | null;
+      const fallbackLocationId = String(
+        (movementResult.data?.[0] as { location_id?: string } | undefined)
+          ?.location_id ?? ""
+      );
+      const saleData = rawSale
+        ? { ...rawSale, location_id: rawSale.location_id || fallbackLocationId }
+        : null;
+      const itemRows = (itemResult.data ?? []) as SaleItem[];
+      let stockByProduct = new Map<string, number>();
+      if (saleData?.location_id && itemRows.length > 0) {
+        const stockResult = await supabase
+          .from("location_stock")
+          .select("*")
+          .eq("location_id", saleData.location_id)
+          .in(
+            "product_id",
+            itemRows.map((item) => String(item.product_id ?? "")).filter(Boolean)
+          );
+        if (stockResult.error) {
+          setError(stockResult.error.message);
+          setLoading(false);
+          return;
+        }
+        stockByProduct = new Map(
+          ((stockResult.data ?? []) as StockRow[]).map((product) => [
+            product.product_id,
+            Number(product.stock),
+          ])
+        );
+      }
       setSale(saleData);
-      setCustomers((custs ?? []) as Customer[]);
+      setCustomers((customerResult.data ?? []) as Customer[]);
       setCustomerId(saleData?.customer_id ?? "");
       setDiscount(saleData ? String(saleData.discount ?? 0) : "");
       setPaymentMethod(saleData?.payment_method ?? "cash");
       setPaidAmount(saleData ? String(saleData.paid_amount ?? 0) : "");
       setNote(saleData?.note ?? "");
-      setHasReturns(((returns ?? []) as SaleReturn[]).length > 0);
+      setHasReturns(((returnResult.data ?? []) as SaleReturn[]).length > 0);
       setLines(
-        ((items ?? []) as SaleItem[]).map((item) => ({
+        itemRows.map((item) => ({
           product_id: item.product_id ?? "",
           name: item.product_name,
           unit: item.unit,
-          stock: Number(item.quantity),
+          stock:
+            (item.product_id
+              ? (stockByProduct.get(item.product_id) ?? 0)
+              : 0) + Number(item.quantity),
           gst_rate: Number(item.gst_rate) || 0,
           quantity: String(item.quantity),
           price: String(item.price),
@@ -74,23 +123,34 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
 
   useEffect(() => {
     const q = search.trim().replace(/[,()]/g, "");
-    if (!q) {
+    if (!q || !sale?.location_id) {
       setResults([]);
       return;
     }
+    let cancelled = false;
     const t = setTimeout(async () => {
-      const { data } = await supabase
-        .from("current_stock")
+      const { data, error: searchError } = await supabase
+        .from("location_stock")
         .select("*")
+        .eq("location_id", sale.location_id)
         .eq("is_active", true)
+        .gt("stock", 0)
         .or(`name.ilike.%${q}%,sku.ilike.%${q}%,barcode.ilike.%${q}%`)
         .order("name")
         .limit(8);
+      if (cancelled) return;
+      if (searchError) {
+        setError(searchError.message);
+        setResults([]);
+        return;
+      }
       setResults((data ?? []) as StockRow[]);
     }, 250);
-    return () => clearTimeout(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [sale?.location_id, search, supabase]);
 
   function addProduct(product: StockRow) {
     setError(null);
@@ -153,6 +213,10 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
         setError(`"${line.name}" ni quantity valid nathi`);
         return;
       }
+      if (parseFloat(line.quantity) > line.stock) {
+        setError(`"${line.name}" no aa location par stock ochho che (available: ${line.stock})`);
+        return;
+      }
       const price = parseFloat(line.price);
       if (Number.isNaN(price) || price < 0) {
         setError(`"${line.name}" ni price valid nathi`);
@@ -189,7 +253,18 @@ export default function EditSalePage({ params }: { params: Promise<{ id: string 
   }
 
   if (loading) return <p className="py-8 text-center text-sm text-stone-500">Loading...</p>;
-  if (!sale) return <p className="py-8 text-center text-sm text-stone-500">Sale not found</p>;
+  if (!sale) {
+    return (
+      <div className="mx-auto max-w-lg rounded-lg border border-stone-200 bg-white p-5 text-center">
+        <p className="text-sm text-stone-600">
+          {error ? `Sale load nathi thayu: ${error}` : "Sale not found"}
+        </p>
+        <Link href="/sales" className="mt-3 inline-flex text-sm font-semibold text-emerald-700 hover:text-emerald-800">
+          Back to sales
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-3xl">

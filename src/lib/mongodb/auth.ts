@@ -195,6 +195,7 @@ export async function signUpWithPassword({
   };
   await profiles.insertOne(profile);
   await ensureDefaults(db);
+  await db.collection("allowed_emails").deleteMany({ email: normalizedEmail });
 
   return {
     error: null,

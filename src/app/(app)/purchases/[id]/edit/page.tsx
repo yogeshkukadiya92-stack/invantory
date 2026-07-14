@@ -34,18 +34,25 @@ export default function EditPurchasePage({ params }: { params: Promise<{ id: str
 
   useEffect(() => {
     async function load() {
-      const [{ data: p }, { data: items }, { data: sups }] = await Promise.all([
+      const [purchaseResult, itemResult, supplierResult] = await Promise.all([
         supabase.from("purchase_orders").select("*").eq("id", id).single(),
         supabase.from("purchase_order_items").select("*").eq("po_id", id),
         supabase.from("suppliers").select("*").order("name"),
       ]);
-      const poData = p as PurchaseOrder | null;
+      const loadError =
+        purchaseResult.error ?? itemResult.error ?? supplierResult.error;
+      if (loadError) {
+        setError(loadError.message);
+        setLoading(false);
+        return;
+      }
+      const poData = purchaseResult.data as PurchaseOrder | null;
       setPo(poData);
       setSupplierId(poData?.supplier_id ?? "");
       setNote(poData?.note ?? "");
-      setSuppliers((sups ?? []) as Supplier[]);
+      setSuppliers((supplierResult.data ?? []) as Supplier[]);
       setLines(
-        ((items ?? []) as PurchaseOrderItem[]).map((item) => ({
+        ((itemResult.data ?? []) as PurchaseOrderItem[]).map((item) => ({
           product_id: item.product_id ?? "",
           name: item.product_name,
           unit: item.unit,
@@ -66,17 +73,27 @@ export default function EditPurchasePage({ params }: { params: Promise<{ id: str
       setResults([]);
       return;
     }
+    let cancelled = false;
     const t = setTimeout(async () => {
-      const { data } = await supabase
+      const { data, error: searchError } = await supabase
         .from("current_stock")
         .select("*")
         .eq("is_active", true)
         .or(`name.ilike.%${q}%,sku.ilike.%${q}%,barcode.ilike.%${q}%`)
         .order("name")
         .limit(8);
+      if (cancelled) return;
+      if (searchError) {
+        setError(searchError.message);
+        setResults([]);
+        return;
+      }
       setResults((data ?? []) as StockRow[]);
     }, 250);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
@@ -158,7 +175,18 @@ export default function EditPurchasePage({ params }: { params: Promise<{ id: str
   }
 
   if (loading) return <p className="py-8 text-center text-sm text-stone-500">Loading...</p>;
-  if (!po) return <p className="py-8 text-center text-sm text-stone-500">PO not found</p>;
+  if (!po) {
+    return (
+      <div className="mx-auto max-w-lg rounded-lg border border-stone-200 bg-white p-5 text-center">
+        <p className="text-sm text-stone-600">
+          {error ? `Purchase load nathi thayu: ${error}` : "PO not found"}
+        </p>
+        <Link href="/purchases" className="mt-3 inline-flex text-sm font-semibold text-emerald-700 hover:text-emerald-800">
+          Back to purchases
+        </Link>
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-3xl">

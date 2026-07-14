@@ -26,10 +26,11 @@ export default function SaleDetailPage({
   const [returns, setReturns] = useState<SaleReturn[]>([]);
   const [soldBy, setSoldBy] = useState("");
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
-      const [{ data: s }, { data: li }, { data: bs }, { data: rets }] =
+      const [saleResult, itemResult, businessResult, returnResult] =
         await Promise.all([
           supabase.from("sales").select("*").eq("id", id).single(),
           supabase.from("sale_items").select("*").eq("sale_id", id),
@@ -40,26 +41,38 @@ export default function SaleDetailPage({
             .eq("sale_id", id)
             .order("created_at"),
         ]);
-      setReturns((rets ?? []) as SaleReturn[]);
-      const saleData = s as Sale | null;
+      const loadError =
+        saleResult.error ??
+        itemResult.error ??
+        businessResult.error ??
+        returnResult.error;
+      if (loadError) {
+        setError(loadError.message);
+        setLoading(false);
+        return;
+      }
+      setReturns((returnResult.data ?? []) as SaleReturn[]);
+      const saleData = saleResult.data as Sale | null;
       setSale(saleData);
-      setItems((li ?? []) as SaleItem[]);
-      setBusiness(bs as BusinessSettings | null);
+      setItems((itemResult.data ?? []) as SaleItem[]);
+      setBusiness(businessResult.data as BusinessSettings | null);
 
       if (saleData?.customer_id) {
-        const { data: c } = await supabase
+        const { data: c, error: customerError } = await supabase
           .from("customers")
           .select("*")
           .eq("id", saleData.customer_id)
           .single();
+        if (customerError) setError(customerError.message);
         setCustomer(c as Customer | null);
       }
       if (saleData?.created_by) {
-        const { data: p } = await supabase
+        const { data: p, error: profileError } = await supabase
           .from("profiles")
           .select("full_name")
           .eq("id", saleData.created_by)
           .single();
+        if (profileError) setError(profileError.message);
         setSoldBy(p?.full_name ?? "");
       }
       setLoading(false);
@@ -72,9 +85,14 @@ export default function SaleDetailPage({
     return <p className="py-8 text-center text-sm text-stone-500">Loading...</p>;
   if (!sale)
     return (
-      <p className="py-8 text-center text-sm text-stone-500">
-        Invoice not found
-      </p>
+      <div className="mx-auto max-w-lg rounded-lg border border-stone-200 bg-white p-5 text-center">
+        <p className="text-sm text-stone-600">
+          {error ? `Invoice load nathi thayu: ${error}` : "Invoice not found"}
+        </p>
+        <Link href="/sales" className="mt-3 inline-flex text-sm font-semibold text-emerald-700 hover:text-emerald-800">
+          Back to sales
+        </Link>
+      </div>
     );
 
   const inr = (n: number) =>
@@ -157,6 +175,12 @@ export default function SaleDetailPage({
           </button>
         </div>
       </div>
+
+      {error && (
+        <p role="alert" className="no-print mt-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {error}
+        </p>
+      )}
 
       {/* INVOICE */}
       <div className="invoice-card mt-4 rounded-lg border border-stone-200 bg-white p-6">

@@ -25,33 +25,43 @@ export default function ReturnDetailPage({
   const [customer, setCustomer] = useState<Customer | null>(null);
   const [business, setBusiness] = useState<BusinessSettings | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
-      const [{ data: r }, { data: li }, { data: bs }] = await Promise.all([
+      const [returnResult, itemResult, businessResult] = await Promise.all([
         supabase.from("sale_returns").select("*").eq("id", id).single(),
         supabase.from("sale_return_items").select("*").eq("return_id", id),
         supabase.from("business_settings").select("*").eq("id", 1).single(),
       ]);
-      const retData = r as SaleReturn | null;
+      const loadError =
+        returnResult.error ?? itemResult.error ?? businessResult.error;
+      if (loadError) {
+        setError(loadError.message);
+        setLoading(false);
+        return;
+      }
+      const retData = returnResult.data as SaleReturn | null;
       setRet(retData);
-      setItems((li ?? []) as SaleReturnItem[]);
-      setBusiness(bs as BusinessSettings | null);
+      setItems((itemResult.data ?? []) as SaleReturnItem[]);
+      setBusiness(businessResult.data as BusinessSettings | null);
 
       if (retData) {
-        const { data: s } = await supabase
+        const { data: s, error: saleError } = await supabase
           .from("sales")
           .select("*")
           .eq("id", retData.sale_id)
           .single();
+        if (saleError) setError(saleError.message);
         const saleData = s as Sale | null;
         setSale(saleData);
         if (saleData?.customer_id) {
-          const { data: c } = await supabase
+          const { data: c, error: customerError } = await supabase
             .from("customers")
             .select("*")
             .eq("id", saleData.customer_id)
             .single();
+          if (customerError) setError(customerError.message);
           setCustomer(c as Customer | null);
         }
       }
@@ -65,9 +75,14 @@ export default function ReturnDetailPage({
     return <p className="py-8 text-center text-sm text-stone-500">Loading...</p>;
   if (!ret)
     return (
-      <p className="py-8 text-center text-sm text-stone-500">
-        Credit note not found
-      </p>
+      <div className="mx-auto max-w-lg rounded-lg border border-stone-200 bg-white p-5 text-center">
+        <p className="text-sm text-stone-600">
+          {error ? `Credit note load nathi thayu: ${error}` : "Credit note not found"}
+        </p>
+        <Link href="/sales" className="mt-3 inline-flex text-sm font-semibold text-emerald-700 hover:text-emerald-800">
+          Back to sales
+        </Link>
+      </div>
     );
 
   const inr = (n: number) =>
@@ -103,6 +118,12 @@ export default function ReturnDetailPage({
           Print credit note
         </button>
       </div>
+
+      {error && (
+        <p role="alert" className="no-print mt-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          {error}
+        </p>
+      )}
 
       <div className="invoice-card mt-4 rounded-lg border border-stone-200 bg-white p-6">
         <div className="flex items-start justify-between border-b border-stone-200 pb-4">

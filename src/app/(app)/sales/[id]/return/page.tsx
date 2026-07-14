@@ -33,7 +33,7 @@ export default function SaleReturnPage({
 
   useEffect(() => {
     async function load() {
-      const [{ data: s }, { data: li }, { data: locs }, { data: saleMovements }] = await Promise.all([
+      const [saleResult, itemResult, locationResult, movementResult] = await Promise.all([
         supabase.from("sales").select("*").eq("id", id).single(),
         supabase.from("sale_items").select("*").eq("sale_id", id),
         supabase.from("locations").select("*").order("name"),
@@ -44,12 +44,22 @@ export default function SaleReturnPage({
           .eq("type", "out")
           .limit(1),
       ]);
-      const saleData = s as Sale | null;
+      const loadError =
+        saleResult.error ??
+        itemResult.error ??
+        locationResult.error ??
+        movementResult.error;
+      if (loadError) {
+        setError(loadError.message);
+        setLoading(false);
+        return;
+      }
+      const saleData = saleResult.data as Sale | null;
       setSale(saleData);
 
-      const saleItems = (li ?? []) as SaleItem[];
+      const saleItems = (itemResult.data ?? []) as SaleItem[];
       // Dar item ma thi pehla ketlu return thai gayu che
-      const [{ data: prevReturns }, { data: previousReturnRows }] = await Promise.all([
+      const [returnItemResult, previousReturnResult] = await Promise.all([
         supabase
           .from("sale_return_items")
           .select("sale_item_id, quantity")
@@ -59,14 +69,20 @@ export default function SaleReturnPage({
           ),
         supabase.from("sale_returns").select("total").eq("sale_id", id),
       ]);
+      const returnLoadError = returnItemResult.error ?? previousReturnResult.error;
+      if (returnLoadError) {
+        setError(returnLoadError.message);
+        setLoading(false);
+        return;
+      }
       setPreviouslyRefunded(
-        ((previousReturnRows ?? []) as Array<{ total: number }>).reduce(
+        ((previousReturnResult.data ?? []) as Array<{ total: number }>).reduce(
           (sum, previousReturn) => sum + Number(previousReturn.total),
           0
         )
       );
       const returnedMap = new Map<string, number>();
-      for (const r of prevReturns ?? []) {
+      for (const r of returnItemResult.data ?? []) {
         returnedMap.set(
           r.sale_item_id,
           (returnedMap.get(r.sale_item_id) ?? 0) + Number(r.quantity)
@@ -81,10 +97,10 @@ export default function SaleReturnPage({
         }))
       );
 
-      const locList = (locs ?? []) as Location[];
+      const locList = (locationResult.data ?? []) as Location[];
       setLocations(locList);
       const movementLocation = (
-        (saleMovements ?? []) as Array<{ location_id?: string | null }>
+        (movementResult.data ?? []) as Array<{ location_id?: string | null }>
       )[0]?.location_id;
       const saleLocationId = saleData?.location_id ?? movementLocation;
       const def =
@@ -174,7 +190,14 @@ export default function SaleReturnPage({
     return <p className="py-8 text-center text-sm text-stone-500">Loading...</p>;
   if (!sale)
     return (
-      <p className="py-8 text-center text-sm text-stone-500">Sale not found</p>
+      <div className="mx-auto max-w-lg rounded-lg border border-stone-200 bg-white p-5 text-center">
+        <p className="text-sm text-stone-600">
+          {error ? `Sale load nathi thayu: ${error}` : "Sale not found"}
+        </p>
+        <Link href="/sales" className="mt-3 inline-flex text-sm font-semibold text-emerald-700 hover:text-emerald-800">
+          Back to sales
+        </Link>
+      </div>
     );
 
   const inr = (n: number) =>

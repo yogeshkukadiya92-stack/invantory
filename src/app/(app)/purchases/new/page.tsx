@@ -37,26 +37,39 @@ export default function NewPurchasePage() {
 
   useEffect(() => {
     async function loadInitial() {
-      const [{ data }, { data: locs }] = await Promise.all([
+      const [supplierResult, locationResult] = await Promise.all([
         supabase.from("suppliers").select("*").order("name"),
         supabase.from("locations").select("*").order("name"),
       ]);
-      setSuppliers((data ?? []) as Supplier[]);
-      const locList = (locs ?? []) as Location[];
+      const initialError = supplierResult.error ?? locationResult.error;
+      if (initialError) {
+        setError(initialError.message);
+        return;
+      }
+      setSuppliers((supplierResult.data ?? []) as Supplier[]);
+      const locList = (locationResult.data ?? []) as Location[];
       setLocations(locList);
       const def = locList.find((l) => l.is_default) ?? locList[0];
       if (def) setLocationId(def.id);
 
       const productId = new URLSearchParams(window.location.search).get("product_id");
       if (productId) {
-        const { data: productData } = await supabase
+        const { data: productData, error: productError } = await supabase
           .from("current_stock")
           .select("*")
           .eq("product_id", productId)
           .eq("is_active", true)
           .limit(1);
+        if (productError) {
+          setError(productError.message);
+          return;
+        }
         const product = ((productData ?? []) as StockRow[])[0];
-        if (product) addProduct(product);
+        if (product) {
+          addProduct(product);
+        } else {
+          setError("Selected product inactive che athva malyo nathi.");
+        }
       }
     }
     loadInitial();
@@ -70,17 +83,27 @@ export default function NewPurchasePage() {
       setResults([]);
       return;
     }
+    let cancelled = false;
     const t = setTimeout(async () => {
-      const { data } = await supabase
+      const { data, error: searchError } = await supabase
         .from("current_stock")
         .select("*")
         .eq("is_active", true)
         .or(`name.ilike.%${q}%,sku.ilike.%${q}%,barcode.ilike.%${q}%`)
         .order("name")
         .limit(8);
+      if (cancelled) return;
+      if (searchError) {
+        setError(searchError.message);
+        setResults([]);
+        return;
+      }
       setResults((data ?? []) as StockRow[]);
     }, 250);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search]);
 
@@ -233,7 +256,10 @@ export default function NewPurchasePage() {
             </label>
             <button
               type="button"
-              onClick={() => setShowSupplierForm(true)}
+              onClick={() => {
+                setError(null);
+                setShowSupplierForm(true);
+              }}
               className="shrink-0 rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm font-medium text-stone-700 hover:bg-stone-50"
             >
               Add supplier
@@ -436,6 +462,11 @@ export default function NewPurchasePage() {
             <label htmlFor="new-supplier-phone" className="mb-1 block text-sm font-medium text-stone-700">Phone</label>
             <input id="new-supplier-phone" type="tel" className={`${input} w-full`} value={newSupplier.phone} onChange={(e) => setNewSupplier((s) => ({ ...s, phone: e.target.value }))} />
           </div>
+          {error && (
+            <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+              {error}
+            </p>
+          )}
         </div>
       </Modal>
     </div>

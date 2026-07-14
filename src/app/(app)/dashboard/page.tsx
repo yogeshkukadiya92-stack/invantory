@@ -12,15 +12,15 @@ export default async function DashboardPage() {
 
   const today = indiaStartOfDayIso();
   const [
-    { data: stockRows },
-    { data: lowStock },
-    { data: recentMovements },
-    { data: todaySales },
-    { data: todayReturns },
-    { data: expiring },
+    stockResult,
+    lowStockResult,
+    movementResult,
+    salesResult,
+    returnsResult,
+    expiringResult,
   ] = await Promise.all([
     supabase.from("current_stock").select("*").eq("is_active", true),
-    supabase.from("low_stock").select("*").limit(10),
+    supabase.from("low_stock").select("*", { count: "exact" }).limit(10),
     supabase
       .from("stock_movements")
       .select("id, type, quantity, created_at, products(name)")
@@ -34,12 +34,25 @@ export default async function DashboardPage() {
       .order("expiry_date")
       .limit(10),
   ]);
+  const stockRows = stockResult.data;
+  const lowStock = lowStockResult.data;
+  const recentMovements = movementResult.data;
+  const todaySales = salesResult.data;
+  const todayReturns = returnsResult.data;
+  const expiring = expiringResult.data;
+  const loadError =
+    stockResult.error ??
+    lowStockResult.error ??
+    movementResult.error ??
+    salesResult.error ??
+    returnsResult.error ??
+    expiringResult.error;
   const expiringRows = (expiring ?? []) as BatchStockRow[];
 
   const rows = (stockRows ?? []) as StockRow[];
   const totalProducts = rows.length;
   const totalValue = rows.reduce((sum, r) => sum + Number(r.stock_value), 0);
-  const lowCount = lowStock?.length ?? 0;
+  const lowCount = lowStockResult.count ?? lowStock?.length ?? 0;
   const todayTotal =
     ((todaySales ?? []) as { grand_total: number }[]).reduce(
       (sum, sale) => sum + Number(sale.grand_total),
@@ -83,6 +96,12 @@ export default async function DashboardPage() {
           <Link href="/sales/new" className="rounded-md bg-emerald-700 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-800">New sale</Link>
         </div>
       </div>
+
+      {loadError && (
+        <p role="alert" className="mt-4 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          Dashboard data load nathi thayu: {loadError.message}
+        </p>
+      )}
 
       <div className="mt-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
         {stats.map((s) => (

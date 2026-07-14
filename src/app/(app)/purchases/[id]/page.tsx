@@ -30,26 +30,36 @@ export default function PurchaseDetailPage({
   const [loading, setLoading] = useState(true);
 
   const load = useCallback(async () => {
-    const [{ data: p }, { data: li }, { data: locs }] = await Promise.all([
+    setLoading(true);
+    setError(null);
+    const [purchaseResult, itemResult, locationResult] = await Promise.all([
       supabase.from("purchase_orders").select("*").eq("id", id).single(),
       supabase.from("purchase_order_items").select("*").eq("po_id", id),
       supabase.from("locations").select("*").order("name"),
     ]);
-    const locList = (locs ?? []) as Location[];
+    const loadError =
+      purchaseResult.error ?? itemResult.error ?? locationResult.error;
+    if (loadError) {
+      setError(loadError.message);
+      setLoading(false);
+      return;
+    }
+    const locList = (locationResult.data ?? []) as Location[];
     setLocations(locList);
     setLocationId(
       (prev) =>
         prev || (locList.find((l) => l.is_default) ?? locList[0])?.id || ""
     );
-    const poData = p as PurchaseOrder | null;
+    const poData = purchaseResult.data as PurchaseOrder | null;
     setPo(poData);
-    setItems((li ?? []) as PurchaseOrderItem[]);
+    setItems((itemResult.data ?? []) as PurchaseOrderItem[]);
     if (poData?.supplier_id) {
-      const { data: s } = await supabase
+      const { data: s, error: supplierError } = await supabase
         .from("suppliers")
         .select("*")
         .eq("id", poData.supplier_id)
         .single();
+      if (supplierError) setError(supplierError.message);
       setSupplier(s as Supplier | null);
     }
     setLoading(false);
@@ -96,7 +106,14 @@ export default function PurchaseDetailPage({
     return <p className="py-8 text-center text-sm text-stone-500">Loading...</p>;
   if (!po)
     return (
-      <p className="py-8 text-center text-sm text-stone-500">PO not found</p>
+      <div className="mx-auto max-w-lg rounded-lg border border-stone-200 bg-white p-5 text-center">
+        <p className="text-sm text-stone-600">
+          {error ? `Purchase load nathi thayu: ${error}` : "PO not found"}
+        </p>
+        <Link href="/purchases" className="mt-3 inline-flex text-sm font-semibold text-emerald-700 hover:text-emerald-800">
+          Back to purchases
+        </Link>
+      </div>
     );
 
   const inr = (n: number) =>

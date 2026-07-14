@@ -16,16 +16,24 @@ export default function LabelsPage() {
   const [search, setSearch] = useState("");
   const [selection, setSelection] = useState<LabelSelection>({});
   const [showPrice, setShowPrice] = useState(true);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     async function load() {
-      const { data } = await supabase
+      const { data, error: loadError } = await supabase
         .from("current_stock")
         .select("*")
         .eq("is_active", true)
         .not("barcode", "is", null)
         .order("name");
+      if (loadError) {
+        setError(loadError.message);
+        setLoading(false);
+        return;
+      }
       setProducts((data ?? []) as StockRow[]);
+      setLoading(false);
     }
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -146,6 +154,16 @@ export default function LabelsPage() {
             </label>
           </div>
           <ul className="max-h-[420px] divide-y divide-stone-100 overflow-y-auto">
+            {loading && (
+              <li className="px-3 py-6 text-center text-sm text-stone-500">
+                Loading products...
+              </li>
+            )}
+            {error && (
+              <li role="alert" className="bg-red-50 px-3 py-3 text-sm text-red-800">
+                {error}
+              </li>
+            )}
             {filtered.map((p) => {
               const copies = selection[p.product_id] ?? 0;
               return (
@@ -195,7 +213,7 @@ export default function LabelsPage() {
                 </li>
               );
             })}
-            {filtered.length === 0 && (
+            {!loading && !error && filtered.length === 0 && (
               <li className="px-3 py-6 text-center text-sm text-stone-500">
                 Barcode vala products nathi. Pehla product ma barcode add karo.
               </li>

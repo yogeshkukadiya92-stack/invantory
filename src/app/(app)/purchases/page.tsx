@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { createClient } from "@/lib/mongodb/client";
 import type { POStatus, PurchaseOrder } from "@/lib/types";
@@ -23,14 +23,23 @@ export default function PurchasesPage() {
   const [rows, setRows] = useState<PORow[]>([]);
   const [statusFilter, setStatusFilter] = useState<"" | POStatus>("");
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    const timer = window.setTimeout(
+      () => setDebouncedSearch(search.trim()),
+      300
+    );
+    return () => window.clearTimeout(timer);
+  }, [search]);
+
+  useEffect(() => {
     setPage(0);
-  }, [statusFilter]);
+  }, [debouncedSearch, statusFilter]);
 
   useEffect(() => {
     let cancelled = false;
@@ -43,6 +52,12 @@ export default function PurchasesPage() {
         .order("created_at", { ascending: false })
         .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
       if (statusFilter) query = query.eq("status", statusFilter);
+      if (debouncedSearch) {
+        const safeSearch = debouncedSearch.replace(/[,()]/g, "");
+        query = query.or(
+          `po_no.ilike.%${safeSearch}%,supplier_name.ilike.%${safeSearch}%,status.ilike.%${safeSearch}%`
+        );
+      }
       const { data, count, error: loadError } = await query;
       if (cancelled) return;
       if (loadError) {
@@ -58,17 +73,7 @@ export default function PurchasesPage() {
     return () => {
       cancelled = true;
     };
-  }, [page, statusFilter, supabase]);
-
-  const filteredRows = useMemo(() => {
-    const query = search.trim().toLowerCase();
-    if (!query) return rows;
-    return rows.filter((purchase) =>
-      [purchase.po_no, purchase.suppliers?.name, purchase.status]
-        .filter(Boolean)
-        .some((value) => String(value).toLowerCase().includes(query))
-    );
-  }, [rows, search]);
+  }, [debouncedSearch, page, statusFilter, supabase]);
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
   const inr = (value: number) =>
@@ -134,20 +139,20 @@ export default function PurchasesPage() {
 
         {loading ? (
           <LoadingState label="Loading purchases" />
-        ) : filteredRows.length === 0 ? (
+        ) : rows.length === 0 ? (
           <EmptyState
-            title={search ? "No matching purchases" : "No purchase orders found"}
+            title={debouncedSearch ? "No matching purchases" : "No purchase orders found"}
             description={
-              search
+              debouncedSearch
                 ? "Try another PO number, supplier, or status."
                 : "Create a purchase order to record supplier costs and incoming stock."
             }
-            actionHref={search ? undefined : "/purchases/new"}
-            actionLabel={search ? undefined : "Create purchase"}
+            actionHref={debouncedSearch ? undefined : "/purchases/new"}
+            actionLabel={debouncedSearch ? undefined : "Create purchase"}
           />
         ) : (
           <ul className="divide-y divide-stone-100">
-            {filteredRows.map((purchase) => (
+            {rows.map((purchase) => (
               <li key={purchase.id} className="flex items-center gap-2 px-2 py-1.5 sm:px-3">
                 <Link
                   href={`/purchases/${purchase.id}`}

@@ -10,22 +10,26 @@ import {
   LoadingState,
   PageHeader,
   menuItemClass,
+  useToast,
 } from "@/components/DashboardUI";
 
 const PAGE_SIZE = 50;
 
 export default function ProductsPage() {
   const supabase = createClient();
+  const { showToast } = useToast();
   const [rows, setRows] = useState<StockRow[]>([]);
   const [categories, setCategories] = useState<Category[]>([]);
   const [search, setSearch] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("");
   const [stockFilter, setStockFilter] = useState<"all" | "low" | "out">("all");
+  const [statusFilter, setStatusFilter] = useState<"active" | "inactive" | "all">("active");
   const [page, setPage] = useState(0);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [restoringId, setRestoringId] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -51,7 +55,7 @@ export default function ProductsPage() {
 
   useEffect(() => {
     setPage(0);
-  }, [categoryFilter, debouncedSearch, stockFilter]);
+  }, [categoryFilter, debouncedSearch, statusFilter, stockFilter]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -59,9 +63,11 @@ export default function ProductsPage() {
     let query = supabase
       .from(stockFilter === "low" ? "low_stock" : "current_stock")
       .select("*", { count: "exact" })
-      .eq("is_active", true)
       .order("name")
       .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+    if (statusFilter !== "all") {
+      query = query.eq("is_active", statusFilter === "active");
+    }
     if (stockFilter === "out") query = query.lte("stock", 0);
     if (categoryFilter) query = query.eq("category_id", categoryFilter);
     if (debouncedSearch) {
@@ -79,7 +85,7 @@ export default function ProductsPage() {
     setRows((data ?? []) as StockRow[]);
     setTotal(count ?? 0);
     setLoading(false);
-  }, [categoryFilter, debouncedSearch, page, stockFilter, supabase]);
+  }, [categoryFilter, debouncedSearch, page, statusFilter, stockFilter, supabase]);
 
   useEffect(() => {
     load();
@@ -87,11 +93,28 @@ export default function ProductsPage() {
 
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
+  async function reactivate(product: StockRow) {
+    if (restoringId) return;
+    setRestoringId(product.product_id);
+    setError(null);
+    const { error: restoreError } = await supabase
+      .from("products")
+      .update({ is_active: true })
+      .eq("id", product.product_id);
+    setRestoringId(null);
+    if (restoreError) {
+      setError(restoreError.message);
+      return;
+    }
+    await load();
+    showToast(`${product.name} reactivated`);
+  }
+
   return (
     <div>
       <PageHeader
         title="Products"
-        description={`${total.toLocaleString("en-IN")} active products across inventory`}
+        description={`${total.toLocaleString("en-IN")} products matching the current view`}
         actions={
           <>
             <ActionMenu label="Product tools">
@@ -117,7 +140,7 @@ export default function ProductsPage() {
       )}
 
       <section className="mt-5 rounded-lg border border-stone-200 bg-white">
-        <div className="grid gap-2 border-b border-stone-200 p-3 sm:grid-cols-[minmax(0,1fr)_180px_160px]">
+        <div className="grid gap-2 border-b border-stone-200 p-3 sm:grid-cols-2 lg:grid-cols-[minmax(0,1fr)_170px_150px_150px]">
           <label>
             <span className="sr-only">Search products</span>
             <input
@@ -153,20 +176,32 @@ export default function ProductsPage() {
               <option value="out">Out of stock</option>
             </select>
           </label>
+          <label>
+            <span className="sr-only">Product status</span>
+            <select
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+              className="w-full rounded-md border border-stone-300 bg-white px-3 py-2 text-sm"
+            >
+              <option value="active">Active products</option>
+              <option value="inactive">Archived products</option>
+              <option value="all">All products</option>
+            </select>
+          </label>
         </div>
 
         {loading ? (
           <LoadingState label="Loading products" />
         ) : rows.length === 0 ? (
           <EmptyState
-            title={debouncedSearch || categoryFilter || stockFilter !== "all" ? "No matching products" : "No products yet"}
+            title={debouncedSearch || categoryFilter || stockFilter !== "all" || statusFilter !== "active" ? "No matching products" : "No products yet"}
             description={
-              debouncedSearch || categoryFilter || stockFilter !== "all"
+              debouncedSearch || categoryFilter || stockFilter !== "all" || statusFilter !== "active"
                 ? "Clear or change the filters to see more products."
                 : "Add your first product to start tracking stock and sales."
             }
-            actionHref={debouncedSearch || categoryFilter || stockFilter !== "all" ? undefined : "/products/new"}
-            actionLabel={debouncedSearch || categoryFilter || stockFilter !== "all" ? undefined : "Add product"}
+            actionHref={debouncedSearch || categoryFilter || stockFilter !== "all" || statusFilter !== "active" ? undefined : "/products/new"}
+            actionLabel={debouncedSearch || categoryFilter || stockFilter !== "all" || statusFilter !== "active" ? undefined : "Add product"}
           />
         ) : (
           <ul className="divide-y divide-stone-100">
@@ -201,20 +236,35 @@ export default function ProductsPage() {
                     </div>
                     <span
                       className={`ml-2 shrink-0 rounded-full px-2.5 py-1 text-xs font-semibold ${
-                        isOut
+                        !product.is_active
+                          ? "bg-stone-200 text-stone-700"
+                          : isOut
                           ? "bg-red-50 text-red-700"
                           : isLow
                             ? "bg-amber-50 text-amber-700"
                             : "bg-emerald-50 text-emerald-700"
                       }`}
                     >
-                      {product.stock} {product.unit}
+                      {product.is_active ? `${product.stock} ${product.unit}` : "Archived"}
                     </span>
                   </Link>
                   <ActionMenu label={`Actions for ${product.name}`}>
                     <Link href={`/products/${product.product_id}`} className={menuItemClass}>Edit product</Link>
-                    <Link href={`/sales/new?product_id=${encodeURIComponent(product.product_id)}`} className={menuItemClass}>Create sale</Link>
-                    <Link href={`/purchases/new?product_id=${encodeURIComponent(product.product_id)}`} className={menuItemClass}>Create purchase</Link>
+                    {product.is_active ? (
+                      <>
+                        <Link href={`/sales/new?product_id=${encodeURIComponent(product.product_id)}`} className={menuItemClass}>Create sale</Link>
+                        <Link href={`/purchases/new?product_id=${encodeURIComponent(product.product_id)}`} className={menuItemClass}>Create purchase</Link>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => reactivate(product)}
+                        disabled={restoringId !== null}
+                        className={menuItemClass}
+                      >
+                        {restoringId === product.product_id ? "Reactivating..." : "Reactivate product"}
+                      </button>
+                    )}
                   </ActionMenu>
                 </li>
               );

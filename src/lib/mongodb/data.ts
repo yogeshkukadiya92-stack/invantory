@@ -109,18 +109,17 @@ const NON_DELETABLE_TABLES = new Set([
 ]);
 
 const WRITE_FIELDS: Record<string, Set<string>> = {
-  allowed_emails: new Set(["added_by", "email"]),
+  allowed_emails: new Set(["email"]),
   business_settings: new Set([
     "address",
     "gstin",
     "invoice_prefix",
     "name",
     "phone",
-    "updated_at",
   ]),
   categories: new Set(["name"]),
   customers: new Set(["address", "gstin", "name", "phone"]),
-  locations: new Set(["is_default", "name"]),
+  locations: new Set(["name"]),
   products: new Set([
     "barcode",
     "category_id",
@@ -232,6 +231,17 @@ function normalizeSimpleValues(table: string, row: DocumentRow) {
     if ("phone" in row) row.phone = cleanText(row.phone, "Phone", 40) || null;
     if ("address" in row) row.address = cleanText(row.address, "Address", 500) || null;
   }
+  if (table === "business_settings") {
+    if ("name" in row) row.name = cleanText(row.name, "Business name", 160);
+    if ("phone" in row) row.phone = cleanText(row.phone, "Phone", 40);
+    if ("gstin" in row) row.gstin = cleanText(row.gstin, "GSTIN", 30);
+    if ("address" in row) row.address = cleanText(row.address, "Address", 500);
+    if ("invoice_prefix" in row) {
+      row.invoice_prefix =
+        cleanText(row.invoice_prefix, "Invoice prefix", 20)
+          .replace(/[^a-zA-Z0-9_-]/g, "") || "INV";
+    }
+  }
   if (
     table === "profiles" &&
     "role" in row &&
@@ -267,6 +277,12 @@ function assertQueryPermission(query: QueryRequest, user: MongoUser | null) {
   }
   if (query.table === "products" && query.action === "insert") {
     throw new Error("Product create karva approved product action vapro");
+  }
+  if (query.table === "business_settings" && query.action !== "update") {
+    throw new Error("Business settings fakt update thai shake");
+  }
+  if (query.table === "profiles" && query.action !== "update") {
+    throw new Error("Team profile fakt update thai shake");
   }
   if (ADMIN_WRITE_TABLES.has(query.table) && user.role !== "admin") {
     throw new Error("Aa action mate admin role joie");
@@ -382,7 +398,7 @@ async function serializeStockMutation<T>(operation: () => Promise<T>): Promise<T
 async function ensureIndexes(db: Db) {
   await Promise.all([
     db.collection("profiles").createIndex({ email: 1 }, { unique: true }),
-    db.collection("allowed_emails").createIndex({ email: 1 }),
+    db.collection("allowed_emails").createIndex({ email: 1 }, { unique: true }),
     db.collection("categories").createIndex({ name: 1 }, { unique: true }),
     db.collection("products").createIndex(
       { sku: 1 },
@@ -434,9 +450,56 @@ async function ensureIndexes(db: Db) {
     ),
     db.collection("stock_movements").createIndex(
       { po_id: 1, product_id: 1 },
-      { sparse: true, unique: true }
+      {
+        partialFilterExpression: { po_id: { $exists: true } },
+        unique: true,
+      }
     ),
   ]);
+}
+
+async function normalizeStockMovementIndexes(db: Db) {
+  const collection = db.collection("stock_movements");
+  const indexes = await collection.indexes().catch(() => []);
+  const poProductIndex = indexes.find(
+    (index) => index.key?.po_id === 1 && index.key?.product_id === 1
+  );
+  const appliesOnlyToPurchaseMovements =
+    poProductIndex?.partialFilterExpression?.po_id?.$exists === true;
+
+  if (poProductIndex?.name && !appliesOnlyToPurchaseMovements) {
+    await collection.dropIndex(poProductIndex.name);
+  }
+}
+
+async function normalizeAllowedEmails(db: Db) {
+  const collection = db.collection("allowed_emails");
+  const rows = await collection
+    .find({})
+    .sort({ created_at: 1, _id: 1 })
+    .toArray();
+  const seen = new Set<string>();
+
+  for (const row of rows) {
+    const email = String(row.email ?? "").trim().toLowerCase();
+    if (!email || seen.has(email)) {
+      await collection.deleteOne({ _id: row._id });
+      continue;
+    }
+    seen.add(email);
+    if (email !== row.email) {
+      await collection.updateOne(
+        { _id: row._id },
+        { $set: { email } }
+      );
+    }
+  }
+
+  const indexes = await collection.indexes().catch(() => []);
+  const oldEmailIndex = indexes.find(
+    (index) => index.key?.email === 1 && index.unique !== true
+  );
+  if (oldEmailIndex?.name) await collection.dropIndex(oldEmailIndex.name);
 }
 
 async function ensureDocumentIds(db: Db) {
@@ -617,6 +680,8 @@ export async function prepareDatabase(db?: Db) {
     await ensureDocumentIds(database);
     await normalizeProducts(database);
     await normalizeStockMovements(database);
+    await normalizeStockMovementIndexes(database);
+    await normalizeAllowedEmails(database);
     await ensureIndexes(database);
     await repairNegativeStock(database);
   };
@@ -698,13 +763,11 @@ async function locationStockRows(db: Db): Promise<DocumentRow[]> {
     const row =
       totals.get(key) ??
       {
-        is_active: product.is_active ?? true,
+        ...publicRow(product),
         location_id: movement.location_id,
         location_name: location.name,
-        name: product.name,
-        product_id: movement.product_id,
+        product_id: rowPublicId(product),
         stock: 0,
-        unit: product.unit,
       };
     row.stock += signedMovement(movement);
     totals.set(key, row);
@@ -712,6 +775,7 @@ async function locationStockRows(db: Db): Promise<DocumentRow[]> {
   return [...totals.values()].map((row) => ({
     ...row,
     stock: publicStock(row.stock),
+    stock_value: round2(publicStock(row.stock) * toNumber(row.purchase_price)),
   }));
 }
 
@@ -864,6 +928,46 @@ function applyRange(rows: DocumentRow[], query: QueryRequest) {
   return rows;
 }
 
+async function addSearchFields(
+  db: Db,
+  table: string,
+  query: QueryRequest,
+  rows: DocumentRow[]
+) {
+  const expressions = query.orFilters.join(",");
+  if (table === "sales" && expressions.includes("customer_name.")) {
+    const customerIds = [
+      ...new Set(rows.map((row) => row.customer_id).filter(Boolean).map(String)),
+    ];
+    const customers = customerIds.length
+      ? await db.collection("customers").find({ id: { $in: customerIds } }).toArray()
+      : [];
+    const names = new Map(customers.map((row) => [String(row.id), String(row.name)]));
+    return rows.map((row) => ({
+      ...row,
+      customer_name: row.customer_id
+        ? (names.get(String(row.customer_id)) ?? "")
+        : "Walk-in",
+    }));
+  }
+  if (table === "purchase_orders" && expressions.includes("supplier_name.")) {
+    const supplierIds = [
+      ...new Set(rows.map((row) => row.supplier_id).filter(Boolean).map(String)),
+    ];
+    const suppliers = supplierIds.length
+      ? await db.collection("suppliers").find({ id: { $in: supplierIds } }).toArray()
+      : [];
+    const names = new Map(suppliers.map((row) => [String(row.id), String(row.name)]));
+    return rows.map((row) => ({
+      ...row,
+      supplier_name: row.supplier_id
+        ? (names.get(String(row.supplier_id)) ?? "")
+        : "No supplier",
+    }));
+  }
+  return rows;
+}
+
 async function decorateRows(db: Db, table: string, columns: string | undefined, rows: DocumentRow[]) {
   if (!columns) return rows;
   const out = rows.map((row) => ({ ...row }));
@@ -940,6 +1044,7 @@ function makeInsertRows(table: string, values: unknown, user: MongoUser | null) 
       row.created_by = user?.id ?? null;
       row.updated_at = row.updated_at ?? created;
     }
+    if (table === "locations") row.is_default = false;
     if (table === "stock_movements") {
       row.created_by = user?.id;
       row.location_id = row.location_id ?? null;
@@ -1096,7 +1201,11 @@ async function updateRows(db: Db, query: QueryRequest) {
   if (Object.keys(values).length > 0) update.$set = values;
   if (Object.keys(unset).length > 0) update.$unset = unset;
   if (Object.keys(update).length === 0) return rows.map(publicRow);
-  await db.collection(query.table).updateMany(idFilter(ids.map(String)), update);
+  const updateFilter =
+    query.table === "business_settings"
+      ? { id: { $in: ids } }
+      : idFilter(ids.map(String));
+  await db.collection(query.table).updateMany(updateFilter, update);
   return rows.map((row) =>
     publicRow({
       ...row,
@@ -1152,6 +1261,7 @@ export async function executeMongoQuery<T = unknown>(
       rows = await deleteRows(db, query);
     } else {
       rows = await rowsForTable(db, query.table);
+      rows = await addSearchFields(db, query.table, query, rows);
       rows = applyFilters(rows, query);
     }
 
@@ -1192,7 +1302,13 @@ async function resolveBatch(
   expiryDate?: string | null,
   batchId?: string | null
 ) {
-  if (batchId) return batchId;
+  if (batchId) {
+    const batch = await db.collection("batches").findOne(singleIdFilter(batchId));
+    if (!batch || String(batch.product_id) !== productId) {
+      throw new Error("Batch aa product mate valid nathi");
+    }
+    return String(batch.id);
+  }
   if (!batchNo?.trim()) return null;
   const normalized = batchNo.trim();
   const existing = await db.collection("batches").findOne({
@@ -1307,7 +1423,22 @@ async function lookupBarcode(db: Db, args: DocumentRow) {
     (row) => row.barcode === barcode && row.is_active === true
   );
   if (!product) return { barcode, found: false };
-  return { found: true, product };
+  const locationId = args.p_location_id ? String(args.p_location_id) : null;
+  if (!locationId) return { found: true, product };
+  const location = await db.collection("locations").findOne({ id: locationId });
+  if (!location) throw new Error("Location not found");
+  const stock = publicStock(
+    await getLocationStock(db, String(product.product_id), locationId)
+  );
+  return {
+    found: true,
+    product: {
+      ...product,
+      location_id: locationId,
+      stock,
+      stock_value: round2(stock * toNumber(product.purchase_price)),
+    },
+  };
 }
 
 async function createProduct(db: Db, args: DocumentRow, user: MongoUser) {
@@ -1571,6 +1702,9 @@ async function createSale(db: Db, args: DocumentRow, user: MongoUser) {
     const quantity = finiteNumber(item.quantity, "Quantity");
     const price = requireNonNegativeNumber(item.price, "Price");
     if (!product) throw new Error("Product not found");
+    if (product.is_active === false) {
+      throw new Error(`"${product.name}" inactive che ane navi sale ma add nathi thai shaktu`);
+    }
     if (quantity <= 0) throw new Error("Quantity 0 thi vadhare hovi joie");
     if (price < 0) throw new Error("Price valid nathi");
     const stock = await getLocationStock(db, String(item.product_id), locationId);
@@ -1718,6 +1852,9 @@ async function updateSale(db: Db, args: DocumentRow, user: MongoUser) {
     .find(idFilter(items.map((item) => String(item.product_id ?? ""))))
     .toArray();
   const productMap = new Map(products.map((product) => [rowPublicId(product), product]));
+  const previousProductIds = new Set(
+    oldSaleItems.map((item) => String(item.product_id ?? "")).filter(Boolean)
+  );
   const oldOutByProduct = new Map<string, number>();
   for (const movement of oldMovements) {
     if (String(movement.location_id) !== locationId) continue;
@@ -1731,6 +1868,9 @@ async function updateSale(db: Db, args: DocumentRow, user: MongoUser) {
     const quantity = finiteNumber(item.quantity, "Quantity");
     const price = requireNonNegativeNumber(item.price, "Price");
     if (!product) throw new Error("Product not found");
+    if (product.is_active === false && !previousProductIds.has(productId)) {
+      throw new Error(`"${product.name}" inactive che ane sale ma add nathi thai shaktu`);
+    }
     if (quantity <= 0) throw new Error("Quantity 0 thi vadhare hovi joie");
     if (price < 0) throw new Error("Price valid nathi");
     const available = await getLocationStock(db, productId, locationId) + (oldOutByProduct.get(productId) ?? 0);
@@ -1894,6 +2034,9 @@ async function createPurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
     const quantity = finiteNumber(item.quantity, "Quantity");
     const cost = requireNonNegativeNumber(item.cost, "Cost");
     if (!product) throw new Error("Product not found");
+    if (product.is_active === false) {
+      throw new Error(`"${product.name}" inactive che ane purchase ma add nathi thai shaktu`);
+    }
     if (quantity <= 0) throw new Error("Quantity 0 thi vadhare hovi joie");
     if (cost < 0) throw new Error("Cost valid nathi");
     const line = round2(quantity * cost);
@@ -1996,6 +2139,9 @@ async function updatePurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
     .find(idFilter(items.map((item) => String(item.product_id ?? ""))))
     .toArray();
   const productMap = new Map(products.map((product) => [rowPublicId(product), product]));
+  const previousProductIds = new Set(
+    oldItems.map((item) => String(item.product_id ?? "")).filter(Boolean)
+  );
   const oldInByProduct = new Map<string, number>();
   for (const movement of oldMovements) {
     if (String(movement.location_id) !== locationId) continue;
@@ -2020,6 +2166,9 @@ async function updatePurchaseOrder(db: Db, args: DocumentRow, user: MongoUser) {
     const quantity = finiteNumber(item.quantity, "Quantity");
     const cost = requireNonNegativeNumber(item.cost, "Cost");
     if (!product) throw new Error("Product not found");
+    if (product.is_active === false && !previousProductIds.has(productId)) {
+      throw new Error(`"${product.name}" inactive che ane purchase ma add nathi thai shaktu`);
+    }
     if (quantity <= 0) throw new Error("Quantity 0 thi vadhare hovi joie");
     if (cost < 0) throw new Error("Cost valid nathi");
     const line = round2(quantity * cost);

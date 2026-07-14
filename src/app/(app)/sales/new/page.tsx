@@ -48,12 +48,17 @@ export default function NewSalePage() {
 
   useEffect(() => {
     async function loadInitial() {
-      const [{ data }, { data: locs }] = await Promise.all([
+      const [customerResult, locationResult] = await Promise.all([
         supabase.from("customers").select("*").order("name"),
         supabase.from("locations").select("*").order("name"),
       ]);
-      setCustomers((data ?? []) as Customer[]);
-      const locList = (locs ?? []) as Location[];
+      const initialError = customerResult.error ?? locationResult.error;
+      if (initialError) {
+        setError(initialError.message);
+        return;
+      }
+      setCustomers((customerResult.data ?? []) as Customer[]);
+      const locList = (locationResult.data ?? []) as Location[];
       setLocations(locList);
       const saved = localStorage.getItem("sale_location");
       const def =
@@ -61,17 +66,31 @@ export default function NewSalePage() {
         locList.find((l) => l.is_default) ??
         locList[0];
       if (def) setLocationId(def.id);
+      if (!def) {
+        setError("Sale mate stock location nathi. Settings ma location add karo.");
+        return;
+      }
 
       const productId = new URLSearchParams(window.location.search).get("product_id");
       if (productId) {
-        const { data: productData } = await supabase
-          .from("current_stock")
+        const { data: productData, error: productError } = await supabase
+          .from("location_stock")
           .select("*")
           .eq("product_id", productId)
+          .eq("location_id", def.id)
           .eq("is_active", true)
+          .gt("stock", 0)
           .limit(1);
+        if (productError) {
+          setError(productError.message);
+          return;
+        }
         const product = ((productData ?? []) as StockRow[])[0];
-        if (product) addProduct(product);
+        if (product) {
+          addProduct(product);
+        } else {
+          setError("Selected product no aa location par sale mate stock nathi.");
+        }
       }
     }
     loadInitial();
@@ -82,23 +101,70 @@ export default function NewSalePage() {
   // Product search — debounced
   useEffect(() => {
     const q = search.trim().replace(/[,()]/g, "");
-    if (!q) {
+    if (!q || !locationId) {
       setResults([]);
       return;
     }
+    let cancelled = false;
     const t = setTimeout(async () => {
-      const { data } = await supabase
-        .from("current_stock")
+      const { data, error: searchError } = await supabase
+        .from("location_stock")
         .select("*")
+        .eq("location_id", locationId)
         .eq("is_active", true)
+        .gt("stock", 0)
         .or(`name.ilike.%${q}%,sku.ilike.%${q}%,barcode.ilike.%${q}%`)
         .order("name")
         .limit(8);
+      if (cancelled) return;
+      if (searchError) {
+        setError(searchError.message);
+        setResults([]);
+        return;
+      }
       setResults((data ?? []) as StockRow[]);
     }, 250);
-    return () => clearTimeout(t);
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [locationId, search, supabase]);
+
+  useEffect(() => {
+    if (!locationId || lines.length === 0) return;
+    const productIds = lines.map((line) => line.product_id);
+    let cancelled = false;
+    async function refreshLineStock() {
+      const { data, error: stockError } = await supabase
+        .from("location_stock")
+        .select("*")
+        .eq("location_id", locationId)
+        .in("product_id", productIds);
+      if (cancelled) return;
+      if (stockError) {
+        setError(stockError.message);
+        return;
+      }
+      const stockByProduct = new Map(
+        ((data ?? []) as StockRow[]).map((product) => [
+          product.product_id,
+          Number(product.stock),
+        ])
+      );
+      setLines((current) =>
+        current.map((line) => ({
+          ...line,
+          stock: stockByProduct.get(line.product_id) ?? 0,
+        }))
+      );
+    }
+    refreshLineStock();
+    return () => {
+      cancelled = true;
+    };
+    // Only a location change can make existing line availability stale.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [locationId, supabase]);
 
   function addProduct(p: StockRow) {
     setError(null);
@@ -133,12 +199,22 @@ export default function NewSalePage() {
   async function handleSearchEnter() {
     const code = search.trim();
     if (!code) return;
-    const { data } = await supabase
-      .from("current_stock")
+    if (!locationId) {
+      setError("Sale location select karo");
+      return;
+    }
+    const { data, error: lookupError } = await supabase
+      .from("location_stock")
       .select("*")
+      .eq("location_id", locationId)
       .eq("is_active", true)
+      .gt("stock", 0)
       .eq("barcode", code)
       .limit(1);
+    if (lookupError) {
+      setError(lookupError.message);
+      return;
+    }
     if (data && data.length > 0) {
       addProduct(data[0] as StockRow);
     } else if (results.length > 0) {
@@ -203,6 +279,10 @@ export default function NewSalePage() {
     if (saving) return;
     if (lines.length === 0) {
       setError("Ochha ma ochhi 1 item add karo");
+      return;
+    }
+    if (!locationId) {
+      setError("Sale location select karo");
       return;
     }
     if (discountNum < 0) {
@@ -426,17 +506,17 @@ export default function NewSalePage() {
 
       {/* CUSTOMER + PAYMENT */}
       <div className="mt-4 grid overflow-hidden rounded-lg border border-stone-200 bg-white sm:grid-cols-2 sm:divide-x sm:divide-stone-200">
-        <section className="p-4" aria-labelledby="sale-customer-heading">
+        <section className="min-w-0 p-4" aria-labelledby="sale-customer-heading">
           <h2 id="sale-customer-heading" className="text-sm font-semibold text-stone-900">
             Customer
           </h2>
           <label htmlFor="sale-customer" className="mt-3 block text-xs font-medium text-stone-500">
             Customer account
           </label>
-          <div className="mt-1 flex gap-2">
+          <div className="mt-1 flex min-w-0 gap-2">
             <select
               id="sale-customer"
-              className={`${input} flex-1`}
+              className={`${input} min-w-0 flex-1`}
               value={customerId}
               onChange={(e) => setCustomerId(e.target.value)}
             >
@@ -450,7 +530,10 @@ export default function NewSalePage() {
             </select>
             <button
               type="button"
-              onClick={() => setShowQuickAdd(true)}
+              onClick={() => {
+                setError(null);
+                setShowQuickAdd(true);
+              }}
               className="shrink-0 rounded-lg border border-stone-300 px-3 py-2 text-sm text-stone-700 hover:bg-stone-50"
             >
               New
@@ -469,7 +552,7 @@ export default function NewSalePage() {
           />
         </section>
 
-        <section className="border-t border-stone-200 p-4 sm:border-t-0" aria-labelledby="sale-payment-heading">
+        <section className="min-w-0 border-t border-stone-200 p-4 sm:border-t-0" aria-labelledby="sale-payment-heading">
           <h2 id="sale-payment-heading" className="mb-3 text-sm font-semibold text-stone-900">
             Payment
           </h2>
@@ -630,6 +713,11 @@ export default function NewSalePage() {
               }
             />
           </div>
+          {error && (
+            <p role="alert" className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">
+              {error}
+            </p>
+          )}
         </div>
       </Modal>
     </div>

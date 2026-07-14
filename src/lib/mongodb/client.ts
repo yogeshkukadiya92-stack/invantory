@@ -2,18 +2,39 @@ import type { QueryRequest, QueryResult } from "./data";
 import { MongoQueryBuilder } from "./query-builder";
 
 async function postJson<T>(url: string, body: unknown): Promise<T> {
-  const response = await fetch(url, {
-    body: JSON.stringify(body),
-    headers: { "Content-Type": "application/json" },
-    method: "POST",
-  });
-  const text = await response.text();
   try {
-    return JSON.parse(text) as T;
-  } catch {
+    const response = await fetch(url, {
+      body: JSON.stringify(body),
+      headers: { "Content-Type": "application/json" },
+      method: "POST",
+    });
+    const text = await response.text();
+    let result: T;
+    try {
+      result = JSON.parse(text) as T;
+    } catch {
+      result = {
+        data: null,
+        error: { message: text || response.statusText || "Request failed" },
+      } as T;
+    }
+    if (
+      response.status === 401 &&
+      typeof window !== "undefined" &&
+      window.location.pathname !== "/login"
+    ) {
+      window.location.assign("/login?reason=session-expired");
+    }
+    return result;
+  } catch (error) {
     return {
       data: null,
-      error: { message: text || response.statusText || "Request failed" },
+      error: {
+        message:
+          error instanceof Error && error.message
+            ? `Server request failed: ${error.message}`
+            : "Server request failed. Check your connection and try again.",
+      },
     } as T;
   }
 }

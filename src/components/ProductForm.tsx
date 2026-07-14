@@ -23,6 +23,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
   const [error, setError] = useState<string | null>(null);
   const [missingProduct, setMissingProduct] = useState(false);
   const [confirmDeactivate, setConfirmDeactivate] = useState(false);
+  const [isActive, setIsActive] = useState(true);
 
   const [imageUrl, setImageUrl] = useState<string | null>(null);
   const [imageFile, setImageFile] = useState<File | null>(null);
@@ -46,10 +47,11 @@ export function ProductForm({ productId, initialBarcode }: Props) {
 
   useEffect(() => {
     async function load() {
-      const { data: cats } = await supabase
+      const { data: cats, error: categoryError } = await supabase
         .from("categories")
         .select("*")
         .order("name");
+      if (categoryError) setError(categoryError.message);
       setCategories((cats ?? []) as Category[]);
 
       if (productId) {
@@ -82,6 +84,7 @@ export function ProductForm({ productId, initialBarcode }: Props) {
           gst_rate: String(data.gst_rate ?? 0),
         });
         setImageUrl(data.image_url);
+        setIsActive(data.is_active !== false);
         setLoading(false);
       }
     }
@@ -210,20 +213,22 @@ export function ProductForm({ productId, initialBarcode }: Props) {
     router.refresh();
   }
 
-  async function handleDeactivate() {
+  async function handleStatusChange() {
     if (!productId || saving) return;
     setSaving(true);
     setConfirmDeactivate(false);
     setError(null);
+    const nextActive = !isActive;
     const { error } = await supabase
       .from("products")
-      .update({ is_active: false })
+      .update({ is_active: nextActive })
       .eq("id", productId);
     if (error) {
       setError(error.message);
       setSaving(false);
       return;
     }
+    setIsActive(nextActive);
     router.push("/products");
     router.refresh();
   }
@@ -529,9 +534,13 @@ export function ProductForm({ productId, initialBarcode }: Props) {
               type="button"
               onClick={() => setConfirmDeactivate(true)}
               disabled={saving}
-              className="rounded-lg border border-red-200 px-4 py-2.5 text-sm font-medium text-red-600 hover:bg-red-50 transition-colors"
+              className={`rounded-lg border px-4 py-2.5 text-sm font-medium transition-colors ${
+                isActive
+                  ? "border-red-200 text-red-600 hover:bg-red-50"
+                  : "border-emerald-200 text-emerald-700 hover:bg-emerald-50"
+              }`}
             >
-              Deactivate
+              {isActive ? "Deactivate" : "Reactivate"}
             </button>
           )}
         </div>
@@ -539,11 +548,16 @@ export function ProductForm({ productId, initialBarcode }: Props) {
       <ConfirmDialog
         open={confirmDeactivate}
         onCancel={() => setConfirmDeactivate(false)}
-        onConfirm={handleDeactivate}
+        onConfirm={handleStatusChange}
         busy={saving}
-        title="Deactivate product?"
-        description="The product will be hidden from new sales and purchases. Existing invoices and stock history will remain available."
-        confirmLabel="Deactivate"
+        tone={isActive ? "danger" : "primary"}
+        title={isActive ? "Deactivate product?" : "Reactivate product?"}
+        description={
+          isActive
+            ? "The product will be hidden from new sales and purchases. Existing invoices and stock history will remain available."
+            : "The product will be available again in new sales, purchases, scanning, and stock workflows."
+        }
+        confirmLabel={isActive ? "Deactivate" : "Reactivate"}
       />
     </div>
   );

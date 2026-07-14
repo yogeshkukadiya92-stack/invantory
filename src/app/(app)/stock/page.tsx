@@ -34,6 +34,7 @@ export default function StockPage() {
   const [locStock, setLocStock] = useState<LocationStockRow[]>([]);
   const [batchOptions, setBatchOptions] = useState<BatchStockRow[]>([]);
   const [busy, setBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [activePanel, setActivePanel] = useState<"entry" | "history" | "transfer">("entry");
   const [message, setMessage] = useState<{
     kind: "ok" | "err";
@@ -64,33 +65,46 @@ export default function StockPage() {
   } | null>(null);
 
   const loadMovements = useCallback(async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("stock_movements")
       .select(
         "id, type, quantity, reason, created_at, products(name, unit), profiles:created_by(full_name), locations(name), batches(batch_no)"
       )
       .order("created_at", { ascending: false })
       .limit(50);
+    if (error) {
+      setLoadError(error.message);
+      return;
+    }
     setMovements((data ?? []) as unknown as MovementRow[]);
   }, [supabase]);
 
   const loadProducts = useCallback(async () => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("current_stock")
       .select("*")
       .eq("is_active", true)
       .order("name");
+    if (error) {
+      setLoadError(error.message);
+      return;
+    }
     setProducts((data ?? []) as StockRow[]);
   }, [supabase]);
 
   useEffect(() => {
     async function load() {
-      const [{ data: sups }, { data: locs }] = await Promise.all([
+      const [supplierResult, locationResult] = await Promise.all([
         supabase.from("suppliers").select("*").order("name"),
         supabase.from("locations").select("*").order("name"),
       ]);
-      setSuppliers((sups ?? []) as Supplier[]);
-      const locList = (locs ?? []) as Location[];
+      const initialError = supplierResult.error ?? locationResult.error;
+      if (initialError) {
+        setLoadError(initialError.message);
+        return;
+      }
+      setSuppliers((supplierResult.data ?? []) as Supplier[]);
+      const locList = (locationResult.data ?? []) as Location[];
       setLocations(locList);
       const def = locList.find((l) => l.is_default) ?? locList[0];
       if (def) {
@@ -111,10 +125,14 @@ export default function StockPage() {
       return;
     }
     async function loadLocStock() {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("location_stock")
         .select("*")
         .eq("product_id", form.product_id);
+      if (error) {
+        setLoadError(error.message);
+        return;
+      }
       setLocStock((data ?? []) as LocationStockRow[]);
     }
     loadLocStock();
@@ -128,13 +146,17 @@ export default function StockPage() {
       return;
     }
     async function loadBatches() {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("batch_stock")
         .select("*")
         .eq("product_id", form.product_id)
         .eq("location_id", form.location_id)
         .gt("stock", 0)
         .order("expiry_date", { ascending: true, nullsFirst: false });
+      if (error) {
+        setLoadError(error.message);
+        return;
+      }
       setBatchOptions((data ?? []) as BatchStockRow[]);
     }
     loadBatches();
@@ -148,20 +170,22 @@ export default function StockPage() {
 
   async function getFreshLocationStock() {
     if (!form.product_id || !form.location_id) return 0;
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from("location_stock")
       .select("*")
       .eq("product_id", form.product_id)
       .limit(100);
+    if (error) throw new Error(error.message);
     const rows = (data ?? []) as LocationStockRow[];
     const selected = rows.find((row) => row.location_id === form.location_id);
     if (selected) return Number(selected.stock ?? 0);
     if (rows.length > 0) return 0;
-    const { data: currentData } = await supabase
+    const { data: currentData, error: currentError } = await supabase
       .from("current_stock")
       .select("*")
       .eq("product_id", form.product_id)
       .limit(1);
+    if (currentError) throw new Error(currentError.message);
     return Number(((currentData ?? []) as StockRow[])[0]?.stock ?? 0);
   }
 
@@ -185,7 +209,17 @@ export default function StockPage() {
     let movementQuantity = qty;
     let reason = form.reason.trim() || null;
     if (form.type === "adjustment") {
-      const current = await getFreshLocationStock();
+      let current: number;
+      try {
+        current = await getFreshLocationStock();
+      } catch (error) {
+        setBusy(false);
+        setMessage({
+          kind: "err",
+          text: error instanceof Error ? error.message : "Stock load nathi thayu",
+        });
+        return;
+      }
       movementQuantity = qty - current;
       reason = reason || `Set stock to ${qty}`;
       if (movementQuantity === 0) {
@@ -281,6 +315,15 @@ export default function StockPage() {
           Adjust quantities, transfer inventory, and review movement history
         </p>
       </div>
+
+      {loadError && (
+        <div className="mt-4 flex items-center justify-between gap-3 rounded-md border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-800">
+          <span>{loadError}</span>
+          <button type="button" onClick={() => setLoadError(null)} className="font-semibold underline">
+            Dismiss
+          </button>
+        </div>
+      )}
 
       <div className="mt-5 flex max-w-full overflow-x-auto border-b border-stone-300" role="tablist" aria-label="Stock workspace">
         {([

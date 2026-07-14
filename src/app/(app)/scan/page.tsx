@@ -35,10 +35,14 @@ export default function ScanPage() {
   // Locations load + chhelli vaparayeli location yaad rakho
   useEffect(() => {
     async function loadLocations() {
-      const { data } = await supabase
+      const { data, error } = await supabase
         .from("locations")
         .select("*")
         .order("name");
+      if (error) {
+        showToast(error.message, "error");
+        return;
+      }
       const locs = (data ?? []) as Location[];
       setLocations(locs);
       const saved = localStorage.getItem("scan_location");
@@ -68,6 +72,7 @@ export default function ScanPage() {
 
       const { data, error } = await supabase.rpc("lookup_barcode", {
         p_barcode: code,
+        p_location_id: locationId || null,
       });
       if (error) {
         showToast(error.message, "error");
@@ -84,7 +89,7 @@ export default function ScanPage() {
         setNotFoundCode(code);
       }
     },
-    [showToast, supabase]
+    [locationId, showToast, supabase]
   );
 
   // ---------- USB SCANNER MODE ----------
@@ -211,6 +216,8 @@ export default function ScanPage() {
             onChange={(e) => {
               setLocationId(e.target.value);
               localStorage.setItem("scan_location", e.target.value);
+              setProduct(null);
+              setNotFoundCode(null);
             }}
           >
             {locations.map((l) => (
@@ -336,7 +343,17 @@ export default function ScanPage() {
             <button
               type="button"
               onClick={() => recordMovement("out")}
-              disabled={busy}
+              disabled={
+                busy ||
+                !Number.isFinite(Number(quantity)) ||
+                Number(quantity) <= 0 ||
+                Number(quantity) > product.stock
+              }
+              title={
+                Number(quantity) > product.stock
+                  ? `Only ${product.stock} ${product.unit} available at this location`
+                  : "Remove stock"
+              }
               className="rounded-lg bg-amber-600 py-3 text-sm font-semibold text-white hover:bg-amber-700 disabled:opacity-50"
             >
               Stock out
