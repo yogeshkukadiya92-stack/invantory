@@ -35,7 +35,8 @@ export default function StockPage() {
   const [batchOptions, setBatchOptions] = useState<BatchStockRow[]>([]);
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [activePanel, setActivePanel] = useState<"entry" | "history" | "transfer">("entry");
+  const [activePanel, setActivePanel] = useState<"total" | "entry" | "history">("total");
+  const [stockSearch, setStockSearch] = useState("");
   const [message, setMessage] = useState<{
     kind: "ok" | "err";
     text: string;
@@ -164,6 +165,21 @@ export default function StockPage() {
   }, [form.product_id, form.location_id, form.type, movements]);
 
   const selectedProduct = products.find((p) => p.product_id === form.product_id);
+  const normalizedStockSearch = stockSearch.trim().toLowerCase();
+  const visibleProducts = products.filter((product) => {
+    if (!normalizedStockSearch) return true;
+    return [product.name, product.sku, product.barcode]
+      .filter(Boolean)
+      .some((value) => String(value).toLowerCase().includes(normalizedStockSearch));
+  });
+  const totalQuantity = products.reduce((sum, product) => sum + Number(product.stock || 0), 0);
+  const totalStockValue = products.reduce(
+    (sum, product) => sum + Number(product.stock_value || 0),
+    0
+  );
+  const lowStockCount = products.filter(
+    (product) => Number(product.stock) <= Number(product.min_stock_level)
+  ).length;
   const selectedLocationStock =
     locStock.find((row) => row.location_id === form.location_id)?.stock ??
     (locStock.length === 0 ? selectedProduct?.stock ?? 0 : 0);
@@ -306,6 +322,11 @@ export default function StockPage() {
   const input =
     "w-full rounded-lg border border-stone-300 bg-white px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-600";
   const label = "block text-sm font-medium text-stone-700 mb-1";
+  const inr = (value: number) =>
+    `₹${value.toLocaleString("en-IN", {
+      minimumFractionDigits: 2,
+      maximumFractionDigits: 2,
+    })}`;
 
   return (
     <div>
@@ -327,8 +348,8 @@ export default function StockPage() {
 
       <div className="mt-5 flex max-w-full overflow-x-auto border-b border-stone-300" role="tablist" aria-label="Stock workspace">
         {([
+          { id: "total" as const, label: "Total stock" },
           { id: "entry" as const, label: "Adjust stock" },
-          ...(locations.length > 1 ? [{ id: "transfer" as const, label: "Transfer" }] : []),
           { id: "history" as const, label: "History" },
         ]).map((panel) => (
           <button
@@ -349,6 +370,108 @@ export default function StockPage() {
       </div>
 
       <div className="mt-4">
+        {/* TOTAL STOCK */}
+        <section className={`${activePanel === "total" ? "block" : "hidden"} overflow-hidden rounded-lg border border-stone-200 bg-white`}>
+          <div className="grid border-b border-stone-200 sm:grid-cols-3 sm:divide-x sm:divide-stone-200">
+            <div className="px-4 py-3">
+              <p className="text-xs font-medium text-stone-500">Total quantity</p>
+              <p className="mt-1 text-xl font-semibold text-stone-950">
+                {totalQuantity.toLocaleString("en-IN")}
+              </p>
+            </div>
+            <div className="border-t border-stone-200 px-4 py-3 sm:border-t-0">
+              <p className="text-xs font-medium text-stone-500">Stock value</p>
+              <p className="mt-1 text-xl font-semibold text-stone-950">
+                {inr(totalStockValue)}
+              </p>
+            </div>
+            <div className="border-t border-stone-200 px-4 py-3 sm:border-t-0">
+              <p className="text-xs font-medium text-stone-500">Low stock products</p>
+              <p className={`mt-1 text-xl font-semibold ${lowStockCount > 0 ? "text-red-700" : "text-stone-950"}`}>
+                {lowStockCount}
+              </p>
+            </div>
+          </div>
+
+          <div className="border-b border-stone-200 p-4">
+            <label htmlFor="stock-search" className={label}>Search stock</label>
+            <input
+              id="stock-search"
+              type="search"
+              className={input}
+              value={stockSearch}
+              onChange={(event) => setStockSearch(event.target.value)}
+              placeholder="Product name, SKU, or barcode"
+            />
+          </div>
+
+          {visibleProducts.length === 0 ? (
+            <p className="px-4 py-10 text-center text-sm text-stone-500">
+              {products.length === 0
+                ? "Koi active product available nathi."
+                : "Search mate koi product malyo nathi."}
+            </p>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[680px] text-sm">
+                <thead>
+                  <tr className="border-b border-stone-200 bg-stone-50 text-left text-xs text-stone-500">
+                    <th className="px-4 py-2.5 font-medium">Product</th>
+                    <th className="px-3 py-2.5 font-medium">SKU / Barcode</th>
+                    <th className="px-3 py-2.5 text-right font-medium">Current stock</th>
+                    <th className="px-3 py-2.5 text-right font-medium">Min level</th>
+                    <th className="px-3 py-2.5 text-right font-medium">Value</th>
+                    <th className="px-4 py-2.5 text-right font-medium">Action</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-stone-100">
+                  {visibleProducts.map((product) => {
+                    const lowStock = Number(product.stock) <= Number(product.min_stock_level);
+                    return (
+                      <tr key={product.product_id}>
+                        <td className="px-4 py-3">
+                          <p className="font-medium text-stone-900">{product.name}</p>
+                          <p className="text-xs text-stone-500">{product.unit}</p>
+                        </td>
+                        <td className="px-3 py-3 text-stone-600">
+                          {product.sku || product.barcode || "—"}
+                        </td>
+                        <td className="px-3 py-3 text-right">
+                          <span className={`font-semibold ${lowStock ? "text-red-700" : "text-stone-900"}`}>
+                            {Number(product.stock).toLocaleString("en-IN")} {product.unit}
+                          </span>
+                        </td>
+                        <td className="px-3 py-3 text-right text-stone-600">
+                          {Number(product.min_stock_level).toLocaleString("en-IN")}
+                        </td>
+                        <td className="px-3 py-3 text-right font-medium text-stone-900">
+                          {inr(Number(product.stock_value || 0))}
+                        </td>
+                        <td className="px-4 py-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setForm((current) => ({
+                                ...current,
+                                product_id: product.product_id,
+                                batch_id: "",
+                              }));
+                              setActivePanel("entry");
+                            }}
+                            className="rounded-md border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold text-stone-700 hover:bg-stone-50"
+                          >
+                            Adjust
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+
         <div className="space-y-4">
           {/* MANUAL ENTRY FORM */}
           <section className={`${activePanel === "entry" ? "block" : "hidden"} max-w-2xl rounded-lg border border-stone-200 bg-white p-5`}>
@@ -580,7 +703,7 @@ export default function StockPage() {
 
           {/* TRANSFER */}
           {locations.length > 1 && (
-            <section className={`${activePanel === "transfer" ? "block" : "hidden"} max-w-2xl rounded-lg border border-stone-200 bg-white p-5`}>
+            <section className={`${activePanel === "entry" ? "block" : "hidden"} max-w-2xl rounded-lg border border-stone-200 bg-white p-5`}>
               <h2 className="text-sm font-semibold text-stone-900">
                 Transfer between locations
               </h2>
