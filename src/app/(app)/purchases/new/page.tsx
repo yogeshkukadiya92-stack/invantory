@@ -22,6 +22,7 @@ export default function NewPurchasePage() {
   const [lines, setLines] = useState<Line[]>([]);
   const [search, setSearch] = useState("");
   const [results, setResults] = useState<StockRow[]>([]);
+  const [productsLoading, setProductsLoading] = useState(true);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [supplierId, setSupplierId] = useState("");
   const [showSupplierForm, setShowSupplierForm] = useState(false);
@@ -79,20 +80,22 @@ export default function NewPurchasePage() {
 
   useEffect(() => {
     const q = search.trim().replace(/[,()]/g, "");
-    if (!q) {
-      setResults([]);
-      return;
-    }
     let cancelled = false;
     const t = setTimeout(async () => {
-      const { data, error: searchError } = await supabase
+      setProductsLoading(true);
+      let query = supabase
         .from("current_stock")
         .select("*")
         .eq("is_active", true)
-        .or(`name.ilike.%${q}%,sku.ilike.%${q}%,barcode.ilike.%${q}%`)
-        .order("name")
-        .limit(8);
+        .order("name");
+      if (q) {
+        query = query.or(
+          `name.ilike.%${q}%,sku.ilike.%${q}%,barcode.ilike.%${q}%`
+        );
+      }
+      const { data, error: searchError } = await query.limit(8);
       if (cancelled) return;
+      setProductsLoading(false);
       if (searchError) {
         setError(searchError.message);
         setResults([]);
@@ -131,7 +134,6 @@ export default function NewPurchasePage() {
       ];
     });
     setSearch("");
-    setResults([]);
     searchRef.current?.focus();
   }
 
@@ -304,7 +306,7 @@ export default function NewPurchasePage() {
         )}
       </div>
 
-      <div className="relative mt-3">
+      <div className="mt-3">
         <label className="block">
           <span className="sr-only">Search products</span>
           <input
@@ -316,30 +318,46 @@ export default function NewPurchasePage() {
           autoComplete="off"
           />
         </label>
-        {results.length > 0 && (
-          <ul className="absolute z-10 mt-1 w-full overflow-hidden rounded-lg border border-stone-200 bg-white shadow-lg">
-            {results.map((p) => (
-              <li key={p.product_id}>
-                <button
-                  type="button"
-                  onClick={() => addProduct(p)}
-                  className="flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-stone-50"
-                >
-                  <div className="min-w-0">
-                    <p className="truncate text-sm font-medium text-stone-900">
-                      {p.name}
-                    </p>
-                    <p className="text-xs text-stone-500">
-                      Cost: ₹{Number(p.purchase_price).toLocaleString("en-IN")}{" "}
-                      · Stock: {p.stock} {p.unit}
-                    </p>
-                  </div>
-                  <span className="ml-2 text-emerald-700">+</span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
+        <div className="mt-2 overflow-hidden rounded-lg border border-stone-200 bg-white">
+          {productsLoading ? (
+            <p role="status" className="px-4 py-4 text-center text-sm text-stone-500">
+              Products loading...
+            </p>
+          ) : results.length > 0 ? (
+            <ul className="divide-y divide-stone-100">
+              {results.map((p) => (
+                <li key={p.product_id}>
+                  <button
+                    type="button"
+                    onClick={() => addProduct(p)}
+                    className="flex w-full items-center justify-between px-4 py-2.5 text-left hover:bg-stone-50"
+                  >
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-stone-900">
+                        {p.name}
+                      </p>
+                      <p className="text-xs text-stone-500">
+                        Cost: ₹{Number(p.purchase_price).toLocaleString("en-IN")}{" "}
+                        · Stock: {p.stock} {p.unit}
+                      </p>
+                    </div>
+                    <span className="ml-3 shrink-0 rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-800">
+                      {lines.some((line) => line.product_id === p.product_id)
+                        ? "Add again"
+                        : "Add"}
+                    </span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="px-4 py-4 text-center text-sm text-stone-500">
+              {search.trim()
+                ? `“${search.trim()}” mate koi active product malyo nathi.`
+                : "Purchase mate koi active product available nathi."}
+            </p>
+          )}
+        </div>
       </div>
 
       <div className="mt-4 overflow-hidden rounded-lg border border-stone-200 bg-white">
